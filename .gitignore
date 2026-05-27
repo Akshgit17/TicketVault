@@ -1,0 +1,38 @@
+# Python virtual environments
+venv/
+venv_new/
+Backend/venv312/
+.venv/
+env/
+
+# Python bytecode/cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node.js dependencies
+node_modules/
+Frontend/node_modules/
+
+# Next.js build output
+.next/
+Frontend/.next/
+Frontend/build.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+Backend/.env
+Frontend/.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Scratch and test folders
+scratch/
+Backend/debug_routes.py
+Backend/scratch_test.py
+Backend/run_schema.py

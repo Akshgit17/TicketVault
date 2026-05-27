@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+supabase
+python-jose[cryptography]
+httpx
+python-dotenv
+pydantic
+pydantic-settings
+razorpay
+opencv-python-headless
+pyzbar
+Pillow
+apscheduler
+playwright
+zxing-cpp
+
