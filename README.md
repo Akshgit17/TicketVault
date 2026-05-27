@@ -2,7 +2,9 @@
 
 ## Overview
 
-TicketVault is a full-stack ticket marketplace platform for discovering events, listing tickets, and managing bookings with secure user authentication and payment integration.
+TicketVault is a full-stack concert ticket reselling platform designed to help users safely buy and sell event tickets. Sellers can create listings for tickets they can no longer use, while buyers can discover available listings by event and city, compare options, and complete purchases through a secure checkout flow.
+
+The platform focuses on practical resale needs such as listing management, booking and order tracking, buyer detail capture during checkout, and reliable status handling across the ticket lifecycle. It also integrates authentication, payments, and backend validation to support trusted transactions between users.
 
 The project is organized into:
 
