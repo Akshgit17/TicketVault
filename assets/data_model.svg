@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 520" width="100%" style="background:#0d1117; border-radius:8px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <style>
+    .entity-box { fill: #161b22; stroke: #30363d; stroke-width: 1.5; rx: 6px; }
+    .entity-header { fill: #21262d; stroke: #30363d; stroke-width: 1.5; rx: 6px; }
+    .entity-title { fill: #58a6ff; font-weight: 600; font-size: 13px; text-anchor: middle; }
+    .field-text { fill: #c9d1d9; font-size: 11px; }
+    .pk-text { fill: #d29922; font-weight: 600; font-size: 11px; }
+    .fk-text { fill: #a5d6ff; font-size: 11px; }
+    .arrow { stroke: #8b949e; stroke-width: 1.2; fill: none; marker-end: url(#arrowhead); }
+    .label { fill: #8b949e; font-size: 10px; text-anchor: middle; }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0 0, 7 2.5, 0 5" fill="#8b949e" />
+    </marker>
+  </defs>
+
+  <!-- Cities -->
+  <g transform="translate(30, 30)">
+    <rect x="0" y="0" width="180" height="90" class="entity-box" />
+    <rect x="0" y="0" width="180" height="25" class="entity-header" />
+    <text x="90" y="17" class="entity-title">cities</text>
+    <text x="10" y="42" class="field-text"><tspan class="pk-text">id</tspan> : uuid (PK)</text>
+    <text x="10" y="58" class="field-text">name : text (UK)</text>
+    <text x="10" y="74" class="field-text">city_tier : smallint</text>
+  </g>
+
+  <!-- Users -->
+  <g transform="translate(330, 30)">
+    <rect x="0" y="0" width="220" height="120" class="entity-box" />
+    <rect x="0" y="0" width="220" height="25" class="entity-header" />
+    <text x="110" y="17" class="entity-title">users</text>
+    <text x="10" y="42" class="field-text"><tspan class="pk-text">id</tspan> : uuid (PK)</text>
+    <text x="10" y="58" class="field-text">clerk_id : text (UK)</text>
+    <text x="10" y="74" class="field-text">email : text (UK)</text>
+    <text x="10" y="90" class="field-text">is_admin : bool</text>
+    <text x="10" y="106" class="field-text">razorpay_account_id : text</text>
+  </g>
+
+  <!-- Events -->
+  <g transform="translate(30, 180)">
+    <rect x="0" y="0" width="210" height="135" class="entity-box" />
+    <rect x="0" y="0" width="210" height="25" class="entity-header" />
+    <text x="105" y="17" class="entity-title">events</text>
+    <text x="10" y="42" class="field-text"><tspan class="pk-text">id</tspan> : uuid (PK)</text>
+    <text x="10" y="58" class="field-text">title : text</text>
+    <text x="10" y="74" class="field-text"><tspan class="fk-text">city_id</tspan> : uuid (FK)</text>
+    <text x="10" y="90" class="field-text">date : timestamptz</text>
+    <text x="10" y="106" class="field-text">transfer_supported : bool</text>
+    <text x="10" y="122" class="field-text">popularity_tier : smallint</text>
+  </g>
+
+  <!-- Listings -->
+  <g transform="translate(330, 180)">
+    <rect x="0" y="0" width="220" height="165" class="entity-box" />
+    <rect x="0" y="0" width="220" height="25" class="entity-header" />
+    <text x="110" y="17" class="entity-title">listings</text>
+    <text x="10" y="42" class="field-text"><tspan class="pk-text">id</tspan> : uuid (PK)</text>
+    <text x="10" y="58" class="field-text"><tspan class="fk-text">event_id</tspan> : uuid (FK)</text>
+    <text x="10" y="74" class="field-text"><tspan class="fk-text">seller_id</tspan> : uuid (FK)</text>
+    <text x="10" y="90" class="field-text">price : numeric</text>
+    <text x="10" y="106" class="field-text">original_price : numeric</text>
+    <text x="10" y="122" class="field-text">status : listing_status</text>
+    <text x="10" y="138" class="field-text">deposit_paid_paise : bigint</text>
+    <text x="10" y="154" class="field-text">deposit_returned_at : tz</text>
+  </g>
+
+  <!-- Bookings -->
+  <g transform="translate(630, 180)">
+    <rect x="0" y="0" width="220" height="165" class="entity-box" />
+    <rect x="0" y="0" width="220" height="25" class="entity-header" />
+    <text x="110" y="17" class="entity-title">bookings</text>
+    <text x="10" y="42" class="field-text"><tspan class="pk-text">id</tspan> : uuid (PK)</text>
+    <text x="10" y="58" class="field-text"><tspan class="fk-text">listing_id</tspan> : uuid (FK)</text>
+    <text x="10" y="74" class="field-text"><tspan class="fk-text">user_id</tspan> : uuid (FK)</text>
+    <text x="10" y="90" class="field-text">total_price : numeric</text>
+    <text x="10" y="106" class="field-text">payment_status : text</text>
+    <text x="10" y="122" class="field-text">fulfillment_status : enum</text>
+    <text x="10" y="138" class="field-text">transfer_deadline : tz</text>
+    <text x="10" y="154" class="field-text">escrow_release_at : tz</text>
+  </g>
+
+  <!-- Ledger Entries -->
+  <g transform="translate(470, 390)">
+    <rect x="0" y="0" width="230" height="105" class="entity-box" />
+    <rect x="0" y="0" width="230" height="25" class="entity-header" />
+    <text x="115" y="17" class="entity-title">ledger_entries</text>
+    <text x="10" y="42" class="field-text"><tspan class="pk-text">id</tspan> : uuid (PK)</text>
+    <text x="10" y="58" class="field-text">kind : ledger_kind</text>
+    <text x="10" y="74" class="field-text">direction : text</text>
+    <text x="10" y="90" class="field-text">amount_paise : bigint</text>
+  </g>
+
+  <!-- Relationships Lines -->
+  <path d="M 120 120 L 120 180" class="arrow" />
+  <text x="130" y="150" class="label">hosts</text>
+
+  <path d="M 240 240 L 330 240" class="arrow" />
+  <text x="285" y="233" class="label">tickets for</text>
+
+  <path d="M 440 150 L 440 180" class="arrow" />
+  <text x="450" y="167" class="label">sells</text>
+
+  <path d="M 550 240 L 630 240" class="arrow" />
+  <text x="590" y="233" class="label">sold via</text>
+
+  <path d="M 550 90 L 740 90 L 740 180" class="arrow" />
+  <text x="650" y="83" class="label">buys</text>
+
+  <path d="M 740 345 L 740 440 L 700 440" class="arrow" />
+  <text x="750" y="400" class="label">records</text>
+</svg>

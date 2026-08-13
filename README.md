@@ -53,13 +53,7 @@ broke the deal, out of money they had already put at risk.
 
 ## Architecture
 
-```
-[Browser: Next.js 14 App Router]
-       │
-       ├────► (JWT bearer) ─────► [FastAPI Backend] ─────► [Supabase PostgreSQL & Storage]
-       ├────► (Session) ────────► [Clerk Auth]
-       └────► (Checkout) ───────► [Razorpay] ◄────────────┤ (Webhooks)
-```
+![Architecture Diagram](assets/architecture.svg)
 
 Two things about this diagram are deliberate.
 
@@ -80,11 +74,7 @@ Every state change goes through one service module with explicit allowed
 transitions, and every transition writes an audit row to `booking_events`. No
 route mutates a booking's status directly.
 
-```
-`pending_payment` ➔ `paid` ➔ `awaiting_transfer` ➔ `transfer_initiated` ➔ `transfer_confirmed` ➔ `released`
-                                   │                           │
-                                   └─────────► `failed` ◄──────┘
-```
+![Booking Lifecycle State Machine](assets/booking_lifecycle.svg)
 
 The two terminal states are where the money settles:
 
@@ -226,13 +216,7 @@ actually chose, which is the training set that replaces this one.
 
 ## Data model
 
-| Table | Description & Primary Keys | Key Relationships |
-|---|---|---|
-| `users` | User profiles and credentials (`id`, `clerk_id`, `email`) | `sells` listings, `buys` bookings |
-| `events` | Concerts and venue details (`id`, `title`, `city_id`, `date`) | Hosted in `cities`, has `listings` |
-| `listings` | Ticket listings (`id`, `event_id`, `seller_id`, `price`, `status`) | Linked to `events` & `users` |
-| `bookings` | Escrow bookings (`id`, `listing_id`, `user_id`, `total_price`) | Purchases `listings`, records `ledger_entries` |
-| `ledger_entries` | Financial audit ledger (`id`, `kind`, `amount_paise`, `idempotency_key`) | Audits all payments & deposit releases |
+![Data Model ER Diagram](assets/data_model.svg)
 
 `ledger_entries` carries a unique `idempotency_key` on every row, which is what
 makes a redelivered webhook or a retried job safe rather than merely unlikely.
@@ -357,6 +341,28 @@ Remove them afterwards. The defaults are 24 and 6 hours.
 
 ## What this project does not do
 
-- **Seller payouts are simulated.** Razorpay Route has required ₹40 lakh turnover since the RBI rules of September 2025, so no student project can settle money to a third party. The payout row, fee split, ledger entries and state transitions are all real; only the outbound bank leg is simulated. **Refunds are genuinely real**, including the deposit return.
-- **Ticket transfer is coordinated, not verified.** No public API exists for BookMyShow or District transfers. The platform orchestrates and records the transfer.
-- **There are no notifications.** No email, no SMS. A seller learns their ticket sold by logging in, which is why the transfer SLA is deliberately generous.
+Read [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) before assessing
+it. The short version:
+
+- **Seller payouts are simulated.** Razorpay Route has required ₹40 lakh
+  turnover since the RBI rules of September 2025 and was withdrawn from non
+  compliant merchants on 1 January 2026, so no student project can settle money
+  to a third party. The payout row, fee split, ledger entries and state
+  transitions are all real; only the outbound bank leg is stood in for, with a
+  `sim_` prefixed transfer id. **Refunds are genuinely real**, including the
+  deposit return.
+- **Ticket transfer is coordinated, not verified.** No public API exists for
+  BookMyShow or District transfers. The platform orchestrates and records the
+  transfer. It cannot prove it happened.
+- **There are no notifications.** No email, no SMS. A seller learns their ticket
+  sold by logging in, which is why the transfer SLA is deliberately generous.
+
+## Further reading
+
+| Document | What it covers |
+|---|---|
+| [`docs/VIVA.md`](docs/VIVA.md) | How every part works, plus 29 anticipated questions with answers |
+| [`docs/COLLEGE_PROJECT_PLAN.md`](docs/COLLEGE_PROJECT_PLAN.md) | The active plan, and the reasoning behind each scope decision |
+| [`docs/REMEDIATION_PLAN.md`](docs/REMEDIATION_PLAN.md) | The full audit this began from, and what a production version would need |
+| [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md) | Razorpay webhook handling and replay safety |
+| `docs/decisions/` | Architecture decision records |

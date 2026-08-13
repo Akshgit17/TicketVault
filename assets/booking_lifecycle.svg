@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 280" width="100%" style="background:#0d1117; border-radius:8px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <style>
+    .state-box { fill: #161b22; stroke: #30363d; stroke-width: 1.5; rx: 20px; }
+    .state-terminal { fill: #1f2937; stroke: #58a6ff; stroke-width: 1.5; rx: 20px; }
+    .state-failed { fill: #2c1919; stroke: #f85149; stroke-width: 1.5; rx: 20px; }
+    .node-title { fill: #f0f6fc; font-weight: 600; font-size: 12px; text-anchor: middle; }
+    .arrow { stroke: #8b949e; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead); }
+    .arrow-fail { stroke: #f85149; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead-fail); }
+    .label { fill: #8b949e; font-size: 11px; text-anchor: middle; }
+    .label-fail { fill: #f85149; font-size: 11px; text-anchor: middle; }
+    .start-circle { fill: #f0f6fc; }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#8b949e" />
+    </marker>
+    <marker id="arrowhead-fail" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#f85149" />
+    </marker>
+  </defs>
+
+  <!-- Start Circle -->
+  <circle cx="30" cy="80" r="8" class="start-circle" />
+  <path d="M 38 80 L 65 80" class="arrow" />
+
+  <!-- Main Happy Path States -->
+  <!-- pending_payment -->
+  <rect x="65" y="60" width="135" height="40" class="state-box" />
+  <text x="132" y="84" class="node-title">pending_payment</text>
+
+  <path d="M 200 80 L 255 80" class="arrow" />
+  <text x="227" y="73" class="label">payment captured</text>
+
+  <!-- paid -->
+  <rect x="255" y="60" width="75" height="40" class="state-box" />
+  <text x="292" y="84" class="node-title">paid</text>
+
+  <path d="M 330 80 L 395 80" class="arrow" />
+  <text x="362" y="73" class="label">escrow holds funds</text>
+
+  <!-- awaiting_transfer -->
+  <rect x="395" y="60" width="140" height="40" class="state-box" />
+  <text x="465" y="84" class="node-title">awaiting_transfer</text>
+
+  <path d="M 535 80 L 600 80" class="arrow" />
+  <text x="567" y="73" class="label">seller marks sent</text>
+
+  <!-- transfer_initiated -->
+  <rect x="600" y="60" width="145" height="40" class="state-box" />
+  <text x="672" y="84" class="node-title">transfer_initiated</text>
+
+  <path d="M 745 80 L 805 80" class="arrow" />
+  <text x="775" y="73" class="label">buyer confirms</text>
+
+  <!-- transfer_confirmed -->
+  <rect x="805" y="60" width="145" height="40" class="state-box" opacity="0" /> <!-- spacer -->
+
+  <!-- released -->
+  <rect x="740" y="190" width="100" height="40" class="state-terminal" />
+  <text x="790" y="214" class="node-title">released</text>
+
+  <!-- Happy path down to released -->
+  <path d="M 672 100 L 672 140 L 790 140 L 790 190" class="arrow" />
+  <text x="740" y="155" class="label">buyer confirms receipt / payout plus deposit return</text>
+
+  <!-- Failed State & Fail Branches -->
+  <rect x="465" y="190" width="90" height="40" class="state-failed" />
+  <text x="510" y="214" class="node-title" fill="#f85149">failed</text>
+
+  <!-- awaiting_transfer -> failed -->
+  <path d="M 465 100 L 465 190" class="arrow-fail" />
+  <text x="460" y="145" class="label-fail" text-anchor="end">SLA breached</text>
+
+  <!-- transfer_initiated -> failed -->
+  <path d="M 640 100 L 640 210 L 555 210" class="arrow-fail" />
+  <text x="600" y="225" class="label-fail">buyer reports problem</text>
+
+</svg>
