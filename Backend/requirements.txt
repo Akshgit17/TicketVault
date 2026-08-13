@@ -10,6 +10,7 @@ razorpay
 opencv-python-headless
 zxing-cpp
 apscheduler
+python-multipart
 
 # Optional — error reporting activates only when SENTRY_DSN is set.
 # app/observability.py degrades gracefully if this is not installed.
