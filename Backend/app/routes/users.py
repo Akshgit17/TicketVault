@@ -1,6 +1,5 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr
 from app.middleware.auth import get_current_user
 from app.database import supabase
 
@@ -8,24 +7,47 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-class UpsertUserRequest(BaseModel):
-    name: str
-    email: EmailStr
+def _identity_from_claims(claims: dict) -> tuple[str, str]:
+    """
+    Derive name and email from the verified Clerk token only.
+
+    Previously these came from the request body, so any authenticated user could
+    claim an arbitrary identity — and because users.email is UNIQUE, occupy
+    another person's row. The client is not a trustworthy source for identity.
+    """
+    email = (
+        claims.get("email")
+        or claims.get("primary_email_address")
+        or claims.get("email_address")
+    )
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Token does not contain an email claim. Add email to the Clerk "
+                "JWT template so the backend can identify users."
+            ),
+        )
+
+    name = (
+        claims.get("name")
+        or " ".join(p for p in [claims.get("first_name"), claims.get("last_name")] if p).strip()
+        or email.split("@")[0]
+    )
+    return name, email
 
 
 @router.post("/me")
-async def upsert_user(
-    body: UpsertUserRequest,
-    claims: dict = Depends(get_current_user),
-):
-    """Called on first sign-in to sync Clerk user into Supabase users table."""
+def upsert_user(claims: dict = Depends(get_current_user)):
+    """Called on first sign-in to sync the Clerk user into the Supabase users table."""
     clerk_id = claims["sub"]
-    logger.info(f"Upserting user: clerk_id={clerk_id}, email={body.email}")
+    name, email = _identity_from_claims(claims)
+    logger.info("Upserting user: clerk_id=%s", clerk_id)
     try:
         result = (
             supabase.table("users")
             .upsert(
-                {"clerk_id": clerk_id, "name": body.name, "email": body.email},
+                {"clerk_id": clerk_id, "name": name, "email": email},
                 on_conflict="clerk_id",
             )
             .execute()
@@ -37,11 +59,11 @@ async def upsert_user(
         return result.data[0]
     except Exception as e:
         logger.error(f"Failed to upsert user: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Could not load your profile.")
 
 
 @router.get("/me")
-async def get_me(claims: dict = Depends(get_current_user)):
+def get_me(claims: dict = Depends(get_current_user)):
     clerk_id = claims["sub"]
     try:
         result = (
@@ -58,15 +80,8 @@ async def get_me(claims: dict = Depends(get_current_user)):
         logger.error(f"Error fetching user {clerk_id}: {e}")
         if "JSON object" in str(e) or "404" in str(e): # PostgREST 404 for .single()
              raise HTTPException(status_code=404, detail="User not found in Supabase.")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Could not load your profile.")
 
 
-@router.get("/debug-token")
-async def debug_token(claims: dict = Depends(get_current_user)):
-    """Use this to verify JWT is being parsed correctly. Visit /users/debug-token with a Bearer token."""
-    return {
-        "clerk_id": claims.get("sub"),
-        "email": claims.get("email"),
-        "name": claims.get("name"),
-        "all_claims": claims,
-    }
+# NOTE: GET /users/debug-token was removed in Phase 1.4 — it returned the full
+# decoded JWT claim set to any caller.

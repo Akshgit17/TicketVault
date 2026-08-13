@@ -1,55 +1,53 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
-import { MapPin, ChevronDown } from "lucide-react";
-import { useCityStore, CITIES, type City } from "@/store/city";
-import clsx from "clsx";
 
-export function CitySelector() {
-  const { selectedCity, setCity } = useCityStore();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+import { useEffect, useState } from "react";
+import { MapPin } from "lucide-react";
+import { api } from "@/lib/api";
+import { useCityStore, type City } from "@/store/city";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+
+const ALL = "__all__";
+
+export function CitySelector({ className }: { className?: string }) {
+  const { selected, setCity } = useCityStore();
+  const [cities, setCities] = useState<City[]>([]);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    api
+      .get("/cities")
+      .then(({ data }) => setCities(data ?? []))
+      // Falls back to "All cities", which still returns a full catalogue.
+      .catch(() => setCities([]));
   }, []);
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-zinc-700 bg-zinc-900 text-sm text-zinc-300 hover:border-zinc-500 transition-colors"
+    <Select
+      value={selected?.id ?? ALL}
+      onValueChange={(id) =>
+        setCity(id === ALL ? null : cities.find((c) => c.id === id) ?? null)
+      }
+    >
+      <SelectTrigger
+        className={
+          className ??
+          "h-9 w-[190px] border-transparent bg-secondary/50 text-sm hover:bg-secondary"
+        }
       >
-        <MapPin className="w-3.5 h-3.5 text-amber-400" />
-        <span>{selectedCity ?? "Select city"}</span>
-        <ChevronDown className={clsx("w-3.5 h-3.5 transition-transform", open && "rotate-180")} />
-      </button>
-
-      {open && (
-        <div className="absolute top-full mt-1 left-0 z-50 w-52 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl overflow-hidden animate-fade-up">
-          <div className="grid grid-cols-2 gap-px p-1 max-h-72 overflow-y-auto">
-            {CITIES.map((city) => (
-              <button
-                key={city}
-                onClick={() => { setCity(city as City); setOpen(false); }}
-                className={clsx(
-                  "text-left px-3 py-2 text-sm rounded-md transition-colors",
-                  selectedCity === city
-                    ? "bg-amber-500 text-zinc-950 font-medium"
-                    : "text-zinc-300 hover:bg-zinc-800"
-                )}
-              >
-                {city}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+        <span className="flex items-center gap-2 truncate">
+          <MapPin className="size-3.5 shrink-0 text-primary" />
+          <SelectValue placeholder="All cities" />
+        </span>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL}>All cities</SelectItem>
+        {cities.map((c) => (
+          <SelectItem key={c.id} value={c.id}>
+            {c.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

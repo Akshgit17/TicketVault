@@ -1,114 +1,168 @@
 "use client";
-import { useState, useEffect } from "react";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
+import { toast } from "sonner";
+import { AlertTriangle, CheckCircle2, Info, ShieldCheck } from "lucide-react";
+
 import { api, setAuthToken } from "@/lib/api";
 import { useCityStore } from "@/store/city";
+import { useConfig } from "@/lib/config";
+import { inr } from "@/lib/utils";
 import { QRUpload } from "@/components/ui/QRUpload";
-import { useRouter } from "next/navigation";
+import { RequestEventDialog } from "@/components/ui/RequestEventDialog";
+import { PriceGuidance, type Suggestion } from "@/components/ui/PriceGuidance";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 
 declare global {
   interface Window { Razorpay: any; }
 }
 
+interface Option { id: string; name?: string; title?: string; date?: string }
+
 export default function SellPage() {
   const { getToken } = useAuth();
-  const { selectedCity } = useCityStore();
+  const { selected } = useCityStore();
+  const { config } = useConfig();
   const router = useRouter();
 
-  const [cities, setCities]     = useState<any[]>([]);
-  const [events, setEvents]     = useState<any[]>([]);
-  const [cityId, setCityId]     = useState("");
-  const [eventId, setEventId]   = useState("");
-  const [price, setPrice]       = useState("");
+  const [cities, setCities] = useState<Option[]>([]);
+  const [events, setEvents] = useState<Option[]>([]);
+  const [cityId, setCityId] = useState("");
+  const [eventId, setEventId] = useState("");
+  const [price, setPrice] = useState("");
   const [origPrice, setOrigPrice] = useState("");
-  const [quantity, setQuantity] = useState("1");
-  const [qrFile, setQrFile]     = useState<File[]>([]);
-  const [error, setError]       = useState("");
-  const [loading, setLoading]   = useState(false);
-  const [success, setSuccess]   = useState(false);
+  const [qrFile, setQrFile] = useState<File[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
 
-  const listingFee = price ? (parseFloat(price) * 0.2).toFixed(2) : "0.00";
-
-  // Load cities on mount
   useEffect(() => {
-    api.get("/cities").then(({ data }) => setCities(data));
+    api.get("/cities").then(({ data }) => setCities(data ?? [])).catch(() => setCities([]));
   }, []);
 
-  // Pre-select city from navbar selection
+  // Seed from the navbar selection so the seller does not pick a city twice.
   useEffect(() => {
-    if (!selectedCity || cities.length === 0) return;
-    const found = cities.find((c: any) => c.name === selectedCity);
-    if (found) setCityId(found.id);
-  }, [selectedCity, cities]);
+    if (selected?.id) setCityId(selected.id);
+  }, [selected?.id]);
 
-  // Load events when city changes
   useEffect(() => {
     if (!cityId) { setEvents([]); setEventId(""); return; }
-    api.get("/events", { params: { city_id: cityId } }).then(({ data }) => {
-      setEvents(data);
-      setEventId("");
-    });
+    api
+      .get("/events", { params: { city_id: cityId } })
+      .then(({ data }) => { setEvents(data ?? []); setEventId(""); })
+      .catch(() => setEvents([]));
   }, [cityId]);
 
-  const handleSubmit = async () => {
-    setError("");
-    if (!cityId)    return setError("Select a city.");
-    if (!eventId)   return setError("Select an event.");
-    if (!price)     return setError("Enter selling price.");
-    if (!origPrice) return setError("Enter original price.");
-    if (parseInt(quantity) < 1) return setError("Quantity must be at least 1.");
-    if (!qrFile[0])   return setError("QR code is required to create a listing.");
+  const face = parseFloat(origPrice) || 0;
+  const ask = parseFloat(price) || 0;
 
-    setLoading(true);
+  // The cap is deterministic and comes from the server. It is a rule, not a
+  // recommendation — the pricing model (when it lands) advises *within* it.
+  const cap = face > 0 ? face * config.price_cap_multiplier : 0;
+  const overCap = cap > 0 && ask > cap;
+
+  const deposit = ask > 0 ? ask * config.listing_fee_rate : 0;
+  const compensation = ask > 0 ? ask * config.buyer_compensation_rate : 0;
+  // Shown before they commit. A seller should never discover the commission
+  // on the payout screen after the sale has already happened.
+  const commission = ask > 0 ? ask * config.seller_success_fee_rate : 0;
+
+  const canSubmit = useMemo(
+    () => Boolean(cityId && eventId && face > 0 && ask > 0 && !overCap && qrFile[0]),
+    [cityId, eventId, face, ask, overCap, qrFile]
+  );
+
+  function loadRazorpay(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (window.Razorpay) return resolve();
+      const s = document.createElement("script");
+      s.src = "https://checkout.razorpay.com/v1/checkout.js";
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error("Could not load the payment window."));
+      document.body.appendChild(s);
+    });
+  }
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+
     try {
-      const token = await getToken();
-      setAuthToken(token);
+      setAuthToken(await getToken());
 
       const form = new FormData();
-      form.append("event_id",       eventId);
-      form.append("city_id",        cityId);
-      form.append("price",          price);
+      form.append("event_id", eventId);
+      form.append("city_id", cityId);
+      form.append("price", price);
       form.append("original_price", origPrice);
-      form.append("quantity",       quantity);
+      form.append("quantity", "1");
       form.append("qr_file", qrFile[0]);
 
-      const { data: listData } = await api.post("/listings/create", form);
-      const listingId = listData.listing_id;
+      const { data: listing } = await api.post("/listings/create", form);
+      const listingId = listing.listing_id;
 
-      // 2. Initiate fee payment
-      const { data: feeData } = await api.post(`/listings/${listingId}/initiate-fee`);
+      // Log what we suggested against what they actually chose. This is the
+      // future training set and the live calibration check — and it is the one
+      // thing here that cannot be back-filled later. Never block the listing
+      // on it.
+      if (suggestion) {
+        api
+          .post("/pricing/recommendations", {
+            event_id: eventId,
+            listing_id: listingId,
+            face_value: face,
+            p25: suggestion.p25_paise / 100,
+            p50: suggestion.p50_paise / 100,
+            p75: suggestion.p75_paise / 100,
+            cap: suggestion.cap_paise / 100,
+            sell_probability: suggestion.sell_probability,
+            source: suggestion.source,
+            model_version: suggestion.model_version,
+            chosen_price: ask,
+          })
+          .catch(() => {});
+      }
 
-      // 3. Load Razorpay and open modal
-      await loadRazorpayScript();
+      const { data: fee } = await api.post(`/listings/${listingId}/initiate-fee`);
+      await loadRazorpay();
 
       const rzp = new window.Razorpay({
-        key:         feeData.razorpay_key_id,
-        amount:      Math.round(feeData.amount * 100),
-        currency:    "INR",
-        name:        "TicketVault",
-        description: "20% Listing Fee (Refundable)",
-        order_id:    feeData.razorpay_order_id,
+        key: fee.razorpay_key_id,
+        amount: Math.round(fee.amount * 100),
+        currency: "INR",
+        name: "TicketVault",
+        description: "Refundable security deposit",
+        order_id: fee.razorpay_order_id,
         theme: { color: "#f59e0b" },
-
-        handler: async (response: any) => {
+        handler: async (res: any) => {
           try {
-            const t = await getToken();
-            setAuthToken(t);
+            setAuthToken(await getToken());
             await api.post(`/listings/${listingId}/verify-fee`, {
-              razorpay_order_id:   response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature:  response.razorpay_signature,
+              razorpay_order_id: res.razorpay_order_id,
+              razorpay_payment_id: res.razorpay_payment_id,
+              razorpay_signature: res.razorpay_signature,
             });
-            setSuccess(true);
-            setTimeout(() => router.push("/dashboard"), 2000);
+            toast.success("Your listing is live", {
+              description: "Your deposit is held and returned when the ticket transfers.",
+            });
+            router.push("/dashboard");
           } catch (e: any) {
-            setError(e.message ?? "Fee verification failed.");
+            toast.error("Deposit not confirmed", { description: e.message });
           }
         },
         modal: {
           ondismiss: () => {
-            setLoading(false);
-            setError("Listing created but fee not paid. Complete payment from dashboard.");
+            setSubmitting(false);
+            toast.warning("Listing saved, deposit unpaid", {
+              description: "It won't be visible to buyers until the deposit is paid. Finish from your dashboard.",
+            });
             router.push("/dashboard");
           },
         },
@@ -116,122 +170,188 @@ export default function SellPage() {
 
       rzp.open();
     } catch (e: any) {
-      console.error("Error creating listing:", e);
-      setError(e.message ?? "Failed to create listing.");
+      toast.error("Could not create the listing", { description: e.message });
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  function loadRazorpayScript(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (window.Razorpay) { resolve(); return; }
-      const script = document.createElement("script");
-      script.src = "https://checkout.razorpay.com/v1/checkout.js";
-      script.onload  = () => resolve();
-      script.onerror = () => reject(new Error("Failed to load Razorpay script"));
-      document.body.appendChild(script);
-    });
-  }
-
-  if (success) return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center gap-4">
-      <div className="text-5xl">🎟️</div>
-      <h2 className="font-display text-4xl tracking-wide text-amber-400">LISTING CREATED</h2>
-      <p className="text-zinc-400 text-sm">Redirecting to dashboard...</p>
-    </div>
-  );
-
   return (
-    <div className="max-w-2xl mx-auto px-4 py-12">
-      <h1 className="font-display text-4xl tracking-wide text-zinc-100 mb-2 uppercase">SELL A TICKET</h1>
-      <p className="text-zinc-500 text-sm mb-8">List your ticket on TicketVault marketplace.</p>
+    <div className="container max-w-2xl py-14">
+      <p className="eyebrow mb-2">Sell a ticket</p>
+      <h1 className="font-display text-5xl tracking-display">LIST YOUR TICKET</h1>
+      <p className="mt-2 text-sm text-muted-foreground">
+        One ticket per listing. You&apos;ll transfer it through your ticketing app
+        once someone buys.
+      </p>
 
-      <div className="space-y-5">
-        {/* City selector */}
-        <div>
-          <label className="block text-xs text-zinc-500 mb-1.5 tracking-wider uppercase">City</label>
-          <select
-            value={cityId}
-            onChange={e => setCityId(e.target.value)}
-            className="w-full px-4 py-2.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-sm focus:outline-none focus:border-zinc-500"
-          >
-            <option value="">Select city</option>
-            {cities.map((c: any) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Event selector */}
-        <div>
-          <label className="block text-xs text-zinc-500 mb-1.5 tracking-wider uppercase">Event</label>
-          <select
-            value={eventId}
-            onChange={e => setEventId(e.target.value)}
-            disabled={!cityId || events.length === 0}
-            className="w-full px-4 py-2.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-sm focus:outline-none focus:border-zinc-500 disabled:opacity-50"
-          >
-            <option value="">
-              {!cityId ? "Select city first" : events.length === 0 ? "No events in this city" : "Select event"}
-            </option>
-            {events.map((ev: any) => {
-              const d = new Date(ev.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-              const eventLabel = ev.title ?? ev.name ?? "Untitled Event";
-              return <option key={ev.id} value={ev.id}>{eventLabel} — {d}</option>;
-            })}
-          </select>
-        </div>
-
-        {/* Prices */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1.5 tracking-wider uppercase">Original Price (₹)</label>
-            <input type="number" value={origPrice} onChange={e => setOrigPrice(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-100 font-mono text-sm focus:outline-none focus:border-zinc-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              placeholder="0" min="1" />
+      <div className="mt-10 space-y-6">
+        <div className="grid gap-5 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="city">City</Label>
+            <Select value={cityId} onValueChange={setCityId}>
+              <SelectTrigger id="city">
+                <SelectValue placeholder="Select a city" />
+              </SelectTrigger>
+              <SelectContent>
+                {cities.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1.5 tracking-wider uppercase">Selling Price (₹)</label>
-            <input type="number" value={price} onChange={e => setPrice(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-100 font-mono text-sm focus:outline-none focus:border-zinc-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              placeholder="0" min="1" />
+
+          <div className="space-y-2">
+            <Label htmlFor="event">Event</Label>
+            <Select value={eventId} onValueChange={setEventId} disabled={!cityId}>
+              <SelectTrigger id="event">
+                <SelectValue
+                  placeholder={
+                    !cityId ? "Pick a city first"
+                      : events.length === 0 ? "No events in this city"
+                      : "Select an event"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {events.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.title ?? e.name}
+                    {e.date ? ` · ${new Date(e.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
+        {/* Sellers cannot create events directly — the catalogue is the trust
+            surface. They propose, an admin approves. */}
+        <div className="flex items-center justify-between rounded-md border border-dashed border-border px-4 py-3">
+          <p className="text-sm text-muted-foreground">Can&apos;t find your event?</p>
+          <RequestEventDialog cities={cities} defaultCityId={cityId} />
+        </div>
 
-        {/* Listing fee */}
-        {price && (
-          <div className="flex flex-col gap-1 px-4 py-3 rounded-lg bg-zinc-900 border border-zinc-800 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-zinc-500">Upfront Listing Fee (20%)</span>
-              <span className="text-amber-400 font-mono">₹{listingFee}</span>
+        <Separator perforated />
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="face">Face value (₹)</Label>
+            <Input
+              id="face" type="number" min="1" inputMode="numeric"
+              value={origPrice} onChange={(e) => setOrigPrice(e.target.value)}
+              placeholder="0" className="tnum font-mono"
+            />
+            <p className="text-xs text-muted-foreground">What you originally paid.</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="ask">Your price (₹)</Label>
+            <Input
+              id="ask" type="number" min="1" inputMode="numeric"
+              value={price} onChange={(e) => setPrice(e.target.value)}
+              placeholder="0"
+              className={`tnum font-mono ${overCap ? "border-destructive focus-visible:border-destructive" : ""}`}
+              aria-invalid={overCap}
+            />
+            {cap > 0 && (
+              <p className={`text-xs ${overCap ? "text-destructive" : "text-muted-foreground"}`}>
+                {overCap
+                  ? `Capped at ${inr(cap)}.`
+                  : `Maximum ${inr(cap)}.`}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Guidance appears as soon as the face value is known — before the
+            seller commits to a number. Advisory only; the cap below is what
+            actually enforces anything. */}
+        {face > 0 && (
+          <PriceGuidance
+            faceValue={face}
+            eventId={eventId || undefined}
+            price={ask || null}
+            onPriceChange={(next, s) => {
+              setPrice(String(next));
+              if (s) setSuggestion(s);
+            }}
+          />
+        )}
+
+        {overCap && (
+          <div className="flex gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-4">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
+            <div className="text-sm">
+              <p className="font-medium text-destructive">
+                That&apos;s above the {Math.round((config.price_cap_multiplier - 1) * 100)}% cap
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                We cap resale at {inr(cap)} for this ticket so buyers know they&apos;re
+                never being gouged. It&apos;s the reason they trust us over a group chat.
+              </p>
             </div>
-            <p className="text-[10px] text-zinc-600 leading-tight italic">
-              * This fee is required to activate your listing and will be **fully refunded** to you after the ticket is successfully transferred to the buyer.
-            </p>
           </div>
         )}
 
-        {/* QR Upload (required) */}
-        <div>
-          <label className="block text-xs text-zinc-500 mb-1.5 tracking-wider uppercase">QR Code (Required)</label>
+        {/* Deposit explainer. Rate comes from GET /config, never hardcoded. */}
+        {ask > 0 && !overCap && (
+          <div className="rounded-lg border border-border bg-card p-5">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="size-4 text-primary" />
+              <p className="font-display text-xl tracking-display">
+                REFUNDABLE DEPOSIT
+              </p>
+            </div>
+
+            <div className="mt-4 flex items-baseline justify-between">
+              <span className="text-sm text-muted-foreground">
+                {Math.round(config.listing_fee_rate * 100)}% of your price, paid now
+              </span>
+              <span className="tnum font-mono text-2xl text-primary">{inr(deposit)}</span>
+            </div>
+
+            <div className="perforation my-4" />
+
+            <ul className="space-y-2.5 text-sm">
+              <li className="flex gap-2.5">
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+                <span className="text-muted-foreground">
+                  You get <span className="text-foreground">all of it back</span>, plus{" "}
+                  <span className="text-foreground">{inr(ask - commission)}</span> from
+                  the sale, once the buyer confirms the transfer.
+                </span>
+              </li>
+              <li className="flex gap-2.5">
+                <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <span className="text-muted-foreground">
+                  If you don&apos;t transfer within {config.transfer_sla_hours} hours,
+                  the buyer is refunded and paid {inr(compensation)} from this deposit.
+                </span>
+              </li>
+            </ul>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <Label>Proof of ownership</Label>
+          <p className="text-xs text-muted-foreground">
+            Upload your ticket&apos;s QR. This is <span className="text-foreground">not</span> sent
+            to the buyer. You&apos;ll transfer the real ticket through your ticketing
+            app. It only proves to us that the ticket exists.
+          </p>
           <QRUpload count={1} onChange={setQrFile} />
         </div>
 
-        {error && (
-          <p className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 px-4 py-2 rounded-lg">
-            {error}
-          </p>
-        )}
-
-        <button
+        <Button
+          size="lg"
+          className="w-full"
           onClick={handleSubmit}
-          disabled={loading}
-          className="w-full py-3 rounded-lg bg-amber-500 text-zinc-950 font-medium hover:bg-amber-400 transition-colors disabled:opacity-50"
+          disabled={!canSubmit}
+          loading={submitting}
         >
-          {loading ? "Submitting..." : "List Ticket"}
-        </button>
+          {ask > 0 && !overCap ? `Pay ${inr(deposit)} deposit & publish` : "List ticket"}
+        </Button>
       </div>
     </div>
   );

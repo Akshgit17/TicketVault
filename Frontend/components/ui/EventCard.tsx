@@ -1,51 +1,106 @@
 import Link from "next/link";
-import { Calendar, MapPin } from "lucide-react";
+import { MapPin } from "lucide-react";
+import { cn, formatEventDate, inr, relativeTo } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 
-interface EventCardProps {
-  event: {
-    id: string;
-    name?: string;
-    title?: string;
-    venue: string;
-    date: string;
-    image_url?: string;
-    cities: { name: string };
-  };
+export interface EventSummary {
+  id: string;
+  title?: string;
+  name?: string;
+  venue: string;
+  date: string;
+  image_url?: string | null;
+  cities?: { name: string } | null;
+  /** Present when the caller has joined listing data. */
+  listing_count?: number;
+  from_price?: number | null;
 }
 
-export function EventCard({ event }: EventCardProps) {
-  const eventLabel = event.title ?? event.name ?? "Untitled Event";
-  const date = new Date(event.date).toLocaleDateString("en-IN", {
-    weekday: "short", day: "numeric", month: "short",
-  });
+/**
+ * The date block is a torn ticket stub rather than a line of text — it is the
+ * single most scanned piece of information on a listings grid, and giving it
+ * its own shape means the eye finds it without reading.
+ */
+export function EventCard({
+  event,
+  className,
+  priority,
+}: {
+  event: EventSummary;
+  className?: string;
+  priority?: boolean;
+}) {
+  const label = event.title ?? event.name ?? "Untitled event";
+  const d = formatEventDate(event.date);
+  const soon = new Date(event.date).getTime() - Date.now() < 7 * 86400000;
 
   return (
-    <Link href={`/events/${event.id}`} className="group block">
-      <div className="relative rounded-xl overflow-hidden aspect-[4/3] bg-zinc-800">
+    <Link
+      href={`/events/${event.id}`}
+      className={cn(
+        "group relative block overflow-hidden rounded-lg border border-border bg-card",
+        "transition-colors hover:border-zinc-700",
+        className
+      )}
+    >
+      <div className="relative aspect-[16/10] overflow-hidden bg-secondary">
         {event.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={event.image_url}
-            alt={eventLabel}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-70"
+            alt=""
+            loading={priority ? "eager" : "lazy"}
+            className="size-full object-cover opacity-75 transition-[transform,opacity] duration-500 group-hover:scale-[1.04] group-hover:opacity-90"
           />
         ) : (
-          <div className="w-full h-full bg-gradient-to-br from-zinc-800 to-zinc-900" />
+          <div className="size-full bg-gradient-to-br from-zinc-800 to-zinc-900" />
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-card via-card/50 to-transparent" />
 
-        <div className="absolute bottom-0 left-0 right-0 p-4">
-          <h3 className="font-display tracking-wide text-xl text-zinc-100 leading-tight">
-            {eventLabel}
-          </h3>
-          <div className="flex items-center gap-3 mt-1.5 text-xs text-zinc-400">
-            <span className="flex items-center gap-1">
-              <Calendar className="w-3 h-3" />{date}
-            </span>
-            <span className="flex items-center gap-1">
-              <MapPin className="w-3 h-3" />{event.venue}
-            </span>
-          </div>
+        {/* Date stub */}
+        <div className="absolute left-4 top-4 rounded-md border border-border bg-background/90 px-2.5 py-1.5 text-center backdrop-blur-sm">
+          <p className="font-mono text-[10px] leading-none tracking-[0.14em] text-primary">
+            {d.month}
+          </p>
+          <p className="tnum font-display text-2xl leading-none">{d.day}</p>
         </div>
+
+        {soon && (
+          <Badge className="absolute right-4 top-4 bg-background/90 backdrop-blur-sm">
+            {relativeTo(event.date)}
+          </Badge>
+        )}
+      </div>
+
+      <div className="p-4">
+        <h3 className="font-display text-xl leading-tight tracking-display line-clamp-2">
+          {label}
+        </h3>
+        <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <MapPin className="size-3 shrink-0" />
+          <span className="truncate">
+            {event.venue}
+            {event.cities?.name ? ` · ${event.cities.name}` : ""}
+          </span>
+        </p>
+
+        {typeof event.listing_count === "number" && (
+          <>
+            <div className="perforation my-3.5" />
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs text-muted-foreground">
+                {event.listing_count === 0
+                  ? "No tickets yet"
+                  : `${event.listing_count} ticket${event.listing_count === 1 ? "" : "s"}`}
+              </span>
+              {event.from_price != null && (
+                <span className="tnum font-mono text-sm text-foreground">
+                  from {inr(event.from_price)}
+                </span>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </Link>
   );

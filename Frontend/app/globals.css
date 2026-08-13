@@ -1,51 +1,175 @@
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=JetBrains+Mono:wght@400;500&display=swap');
+/*
+  TicketVault is dark-only by design. This is a nightlife / live-music product;
+  a light theme would fight the imagery it is built around. Committing to one
+  theme also means every surface can be tuned, rather than merely made to work
+  in both.
+*/
+@layer base {
+  :root {
+    --font-display: 'Bebas Neue', sans-serif;
+    --font-body:    'DM Sans', sans-serif;
+    --font-mono:    'JetBrains Mono', monospace;
 
-:root {
-  --font-display: 'Bebas Neue', sans-serif;
-  --font-body:    'DM Sans', sans-serif;
-  --font-mono:    'JetBrains Mono', monospace;
+    /* shadcn token contract, mapped onto the existing zinc/amber identity */
+    --background:           240 10% 3.9%;   /* zinc-950 */
+    --foreground:           240 5%  96%;    /* zinc-100 */
+
+    --card:                 240 6%  10%;    /* zinc-900 */
+    --card-foreground:      240 5%  96%;
+
+    --popover:              240 6%  8%;
+    --popover-foreground:   240 5%  96%;
+
+    --primary:              38 92% 50%;     /* amber-500 */
+    --primary-foreground:   240 10% 3.9%;
+
+    --secondary:            240 4%  16%;    /* zinc-800 */
+    --secondary-foreground: 240 5%  96%;
+
+    --muted:                240 4%  16%;
+    --muted-foreground:     240 5%  65%;    /* zinc-400 */
+
+    --accent:               240 4%  16%;
+    --accent-foreground:    240 5%  96%;
+
+    --destructive:          0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --success:              142 71% 45%;
+    --success-foreground:   240 10% 3.9%;
+
+    --border:               240 4%  16%;
+    --input:                240 4%  16%;
+    --ring:                 38 92% 50%;
+
+    --radius: 0.5rem;
+  }
+
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /*
+    Numerals are tabular everywhere they carry meaning — prices, countdowns,
+    ledger amounts. Proportional digits make a column of money jitter as it
+    updates, which reads as sloppy on a page about money.
+  */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.25);
+    color: hsl(var(--foreground));
+  }
+
+  ::-webkit-scrollbar       { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: hsl(var(--background)); }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(240 5% 26%); }
 }
 
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
+@layer components {
+  /*
+    Ticket-stub motif. The perforation and the notched edge are the one piece
+    of visual language unique to this product — worth doing properly rather
+    than shipping another rounded rectangle.
+  */
+  .ticket-notch {
+    --notch: 14px;
+    position: relative;
+  }
+  .ticket-notch::before,
+  .ticket-notch::after {
+    content: "";
+    position: absolute;
+    width: var(--notch);
+    height: var(--notch);
+    border-radius: 9999px;
+    background: hsl(var(--background));
+    border: 1px solid hsl(var(--border));
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+  }
+  .ticket-notch::before { left:  calc(var(--notch) / -2 - 1px); }
+  .ticket-notch::after  { right: calc(var(--notch) / -2 - 1px); }
+
+  .perforation {
+    background-image: repeating-linear-gradient(
+      to right,
+      hsl(var(--border)) 0 6px,
+      transparent 6px 12px
+    );
+    height: 1px;
+  }
+
+  .perforation-v {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      hsl(var(--border)) 0 6px,
+      transparent 6px 12px
+    );
+    width: 1px;
+  }
+
+  /* Film grain. Subtle enough to read as texture, not noise. */
+  .grain::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.3;
+  }
+
+  /* Section eyebrow — small mono caps above a display heading. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 }
 
-html {
-  scroll-behavior: smooth;
-}
+@layer utilities {
+  .animate-fade-up {
+    animation: fadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
 
-body {
-  background-color: #09090b;
-  color: #f4f4f5;
-  font-family: var(--font-body);
-  -webkit-font-smoothing: antialiased;
-}
-
-/* Grain overlay */
-.grain::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
-  pointer-events: none;
-  z-index: 9999;
-  opacity: 0.35;
-}
-
-::-webkit-scrollbar       { width: 6px; }
-::-webkit-scrollbar-track { background: #18181b; }
-::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
-
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(16px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.animate-fade-up {
-  animation: fadeUp 0.5s ease forwards;
+  /* Masks carousel edges so cards fade out rather than being cut off. */
+  .mask-fade-x {
+    mask-image: linear-gradient(to right, transparent, black 4%, black 96%, transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent, black 4%, black 96%, transparent);
+  }
 }

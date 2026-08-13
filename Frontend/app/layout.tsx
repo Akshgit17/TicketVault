@@ -5,7 +5,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 
 export const metadata: Metadata = {
-  title: "TicketVault — Verified Concert Tickets",
+  title: "TicketVault | Verified Concert Tickets",
   description: "Buy and sell concert tickets with QR-verified fraud prevention.",
 };
 

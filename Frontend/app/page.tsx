@@ -1,90 +1,166 @@
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
-import { EventCard } from "@/components/ui/EventCard";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, BadgeIndianRupee, CalendarX2, Lock, Repeat } from "lucide-react";
 
-// SSR: direct Supabase call for homepage performance
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { EventCard, type EventSummary } from "@/components/ui/EventCard";
+import { EventCarousel } from "@/components/ui/EventCarousel";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
 
-export const revalidate = 0; // always fetch fresh events in dev/use-now scenarios
+export const revalidate = 0;
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+/**
+ * Events come from the API, not from a direct Supabase call.
+ *
+ * The homepage used to query Supabase with the anon key, which meant two
+ * different data paths to the same table — the API's filters (past events,
+ * search, pagination) applied on every page except this one.
+ */
+async function getEvents(): Promise<EventSummary[]> {
+  try {
+    const res = await fetch(`${API}/events?limit=12&with_availability=true`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    // Backend down: render the page without the catalogue rather than a 500.
+    return [];
+  }
+}
+
+const HOW_IT_WORKS = [
+  {
+    icon: Lock,
+    title: "Your money waits",
+    body: "Payment is held in escrow the moment you buy. The seller does not see a rupee of it until the ticket is in your account.",
+  },
+  {
+    icon: BadgeIndianRupee,
+    title: "The seller has skin in the game",
+    body: "Every seller pays a refundable deposit before their listing goes live. Deliver, and they get it back. Don't, and it pays your refund plus compensation.",
+  },
+  {
+    icon: Repeat,
+    title: "The ticket actually moves",
+    body: "Tickets are transferred inside the official ticketing app, so the seller permanently loses their copy. A screenshot can be sold twice. A transfer cannot.",
+  },
+];
 
 export default async function HomePage() {
-  const { data: events, error } = await supabase
-    .from("events")
-    .select("*, cities(name, slug)")
-    .order("date", { ascending: true })
-    .order("title", { ascending: true })
-    .limit(6);
+  const events = await getEvents();
+  const featured = events.slice(0, 6);
+  const upcoming = events.slice(0, 8);
 
   return (
-    <div className="relative">
-      {/* Hero */}
-      <section className="relative min-h-[88vh] flex items-center justify-center overflow-hidden">
-        <div
-          className="absolute inset-0 bg-cover bg-center opacity-30"
-          style={{ backgroundImage: "url('https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=1600')" }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/60 via-zinc-950/40 to-zinc-950" />
+    <div>
+      {featured.length > 0 ? (
+        <EventCarousel events={featured} />
+      ) : (
+        <section className="border-b border-border">
+          <div className="container flex min-h-[52vh] flex-col justify-center py-20">
+            <p className="eyebrow mb-4">Concert resale, done properly</p>
+            <h1 className="max-w-3xl font-display text-6xl leading-[0.92] tracking-display sm:text-7xl md:text-8xl">
+              TICKETS THAT<br />ACTUALLY ARRIVE
+            </h1>
+            <p className="mt-6 max-w-md text-muted-foreground">
+              Escrowed payments, deposit-backed sellers, and real in-app ticket
+              transfers.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Button asChild size="lg">
+                <Link href="/marketplace">Browse tickets <ArrowRight /></Link>
+              </Button>
+              <Button asChild size="lg" variant="outline">
+                <Link href="/sell">Sell a ticket</Link>
+              </Button>
+            </div>
+          </div>
+        </section>
+      )}
 
-        <div className="relative z-10 text-center px-4 animate-fade-up">
-          <p className="text-amber-400 font-mono text-xs tracking-[0.3em] uppercase mb-4">
-            QR-Verified · Anti-Fraud
-          </p>
-          <h1 className="font-display text-7xl md:text-9xl tracking-widest text-zinc-100 leading-none mb-6">
-            TICKET<br />VAULT
-          </h1>
-          <p className="text-zinc-400 text-lg max-w-md mx-auto mb-10">
-            Buy and sell concert tickets with confidence. Every QR verified. Every ticket guaranteed.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link href="/marketplace" className="px-8 py-3 bg-amber-500 text-zinc-950 font-medium rounded-lg hover:bg-amber-400 transition-colors">
-              Browse Tickets
+      {/* Upcoming */}
+      <section className="container py-20">
+        <div className="mb-8 flex items-end justify-between gap-4">
+          <div>
+            <p className="eyebrow mb-2">On sale now</p>
+            <h2 className="font-display text-4xl tracking-display">UPCOMING SHOWS</h2>
+          </div>
+          {/* /events, not /marketplace. This section lists CONCERTS, so "view
+              all" must lead to all concerts. Pointing it at the marketplace
+              sent people to a list of tickets for sale, which is frequently
+              emptier than the section they clicked from. */}
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/events">
+              View all <ArrowRight />
             </Link>
-            <Link href="/sell" className="px-8 py-3 border border-zinc-600 text-zinc-300 rounded-lg hover:border-zinc-400 hover:text-zinc-100 transition-colors">
-              Sell a Ticket
-            </Link>
+          </Button>
+        </div>
+
+        {upcoming.length === 0 ? (
+          <EmptyState
+            icon={CalendarX2}
+            title="No upcoming events"
+            description="The catalogue is empty, or the API isn't reachable. Run the seed SQL to populate events."
+            actionLabel="Go to marketplace"
+            actionHref="/marketplace"
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            {upcoming.map((e, i) => (
+              <EventCard key={e.id} event={e} priority={i < 4} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* How it works — replaces the old trust strip, which advertised QR
+          fingerprinting, a 10-minute lock and a 2-hour confirmation window.
+          None of those describe how the platform works any more. */}
+      <section id="how-it-works" className="border-y border-border bg-card/40">
+        <div className="container py-20">
+          <p className="eyebrow mb-2">How it works</p>
+          <h2 className="max-w-2xl font-display text-4xl leading-tight tracking-display">
+            THE PART EVERY OTHER RESALE GROUP GETS WRONG
+          </h2>
+
+          <div className="mt-12 grid gap-px overflow-hidden rounded-lg border border-border bg-border md:grid-cols-3">
+            {HOW_IT_WORKS.map(({ icon: Icon, title, body }, i) => (
+              <div key={title} className="bg-background p-7">
+                <div className="mb-5 flex items-center justify-between">
+                  <div className="flex size-9 items-center justify-center rounded-md border border-border bg-secondary/40">
+                    <Icon className="size-4 text-primary" />
+                  </div>
+                  <span className="tnum font-mono text-xs text-border">
+                    0{i + 1}
+                  </span>
+                </div>
+                <h3 className="font-display text-2xl tracking-display">{title}</h3>
+                <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
+                  {body}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* Events */}
-      <section className="max-w-7xl mx-auto px-4 py-16">
-        <div className="flex items-center justify-between mb-8">
-          <h2 className="font-display text-4xl tracking-wide text-zinc-100">EVENTS</h2>
-          <Link href="/marketplace" className="flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
-            View all <ArrowRight className="w-4 h-4" />
-          </Link>
-        </div>
-
-        {error && (
-          <p className="text-zinc-500 text-sm">Could not load events. Check Supabase connection.</p>
-        )}
-
-        {!error && (!events || events.length === 0) && (
-          <p className="text-zinc-500 text-sm">No events found. Run the seed SQL or scraper to populate events.</p>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {(events ?? []).map((e) => <EventCard key={e.id} event={e} />)}
-        </div>
-      </section>
-
-      {/* Trust strip */}
-      <section className="border-y border-zinc-800 py-10">
-        <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 sm:grid-cols-3 gap-6 text-center">
-          {[
-            ["QR Fingerprinting", "Every ticket decoded & hashed. Duplicates rejected instantly."],
-            ["10-Min Lock", "Tickets locked during checkout. No double-selling, ever."],
-            ["2-Hr Confirmation", "Verify your ticket. Auto-confirmed if you don't dispute."],
-          ].map(([title, desc]) => (
-            <div key={title}>
-              <p className="font-display tracking-wide text-amber-400 text-lg mb-1">{title}</p>
-              <p className="text-zinc-500 text-sm">{desc}</p>
-            </div>
-          ))}
+      {/* Seller CTA */}
+      <section className="container py-24">
+        <div className="ticket-notch relative overflow-hidden rounded-lg border border-border bg-card px-8 py-14 text-center">
+          <p className="eyebrow mb-3">Got a ticket you can&apos;t use?</p>
+          <h2 className="mx-auto max-w-2xl font-display text-4xl leading-tight tracking-display sm:text-5xl">
+            LIST IT IN UNDER TWO MINUTES
+          </h2>
+          <p className="mx-auto mt-4 max-w-md text-sm text-muted-foreground">
+            We&apos;ll suggest a price based on what tickets for that show
+            actually sell for, and cap it so buyers know they&apos;re never
+            being gouged.
+          </p>
+          <Button asChild size="lg" className="mt-8">
+            <Link href="/sell">Start selling <ArrowRight /></Link>
+          </Button>
         </div>
       </section>
     </div>

@@ -8,9 +8,32 @@ pydantic
 pydantic-settings
 razorpay
 opencv-python-headless
-pyzbar
-Pillow
-apscheduler
-playwright
 zxing-cpp
+apscheduler
 
+# Optional — error reporting activates only when SENTRY_DSN is set.
+# app/observability.py degrades gracefully if this is not installed.
+sentry-sdk
+
+# Pricing models. Optional at runtime: app/services/pricing.py imports joblib
+# lazily and falls back to rule-based guidance if these are missing or the
+# artifact has not been built, so the sell page works either way.
+#
+# scikit-learn rather than LightGBM deliberately — HistGradientBoosting covers
+# quantile regression and classification, and it drops a heavy binary wheel
+# that is a common CI install failure. On a dataset this size the accuracy
+# difference is noise; the deployment cost is not.
+scikit-learn
+joblib
+numpy
+
+# Training only (ml/generate_dataset.py, ml/train.py). Not imported by the API.
+pandas
+
+# Removed in Phase 1.6:
+#   playwright  — only used by the deleted scraper
+#   pyzbar      — superseded by zxing-cpp in app/services/qr.py; never imported
+#   Pillow      — never imported
+#
+# TODO (Phase 1): pin versions. Unpinned requirements mean an upgrade upstream
+# can break the build with no code change.

@@ -1,30 +1,37 @@
 "use client";
+
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Calendar, MapPin, ShieldCheck, TicketX } from "lucide-react";
+
 import { api } from "@/lib/api";
-import { useRouter } from "next/navigation";
-import { Calendar, MapPin, Tag } from "lucide-react";
+import { formatEventDate, inr, relativeTo } from "@/lib/utils";
 import { BuyTicketModal } from "@/components/ui/BuyTicketModal";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function EventPage({ params }: { params: { id: string } }) {
-  const router = useRouter();
-  const [event, setEvent]       = useState<any>(null);
+  const [event, setEvent] = useState<any>(null);
   const [listings, setListings] = useState<any[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState("");
-  const [selectedListing, setSelectedListing] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selected, setSelected] = useState<any>(null);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       setError("");
       try {
-        // Both endpoints are public — no auth needed
-        const [evRes, listRes] = await Promise.all([
+        // Both endpoints are public — no auth needed.
+        const [ev, ls] = await Promise.all([
           api.get(`/events/${params.id}`),
           api.get("/listings", { params: { event_id: params.id } }),
         ]);
-        setEvent(evRes.data);
-        setListings(listRes.data);
+        setEvent(ev.data);
+        // Cheapest first: the price is what people are here to compare.
+        setListings((ls.data ?? []).sort((a: any, b: any) => a.price - b.price));
       } catch (e: any) {
         setError(e.message ?? "Failed to load event.");
       } finally {
@@ -33,102 +40,144 @@ export default function EventPage({ params }: { params: { id: string } }) {
     })();
   }, [params.id]);
 
-  if (loading) return (
-    <div className="flex items-center justify-center min-h-[60vh]">
-      <div className="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-    </div>
-  );
+  if (loading) {
+    return (
+      <div>
+        <Skeleton className="h-80 rounded-none" />
+        <div className="container max-w-5xl space-y-4 py-12">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-32" />
+        </div>
+      </div>
+    );
+  }
 
-  if (error) return (
-    <div className="flex items-center justify-center min-h-[60vh] text-red-400">
-      <p>{error}</p>
-    </div>
-  );
+  if (error || !event) {
+    return (
+      <div className="container max-w-lg py-24">
+        <EmptyState
+          icon={TicketX}
+          title="Event not found"
+          description={error || "We couldn't find that event."}
+          actionLabel="Browse events"
+          actionHref="/marketplace"
+        />
+      </div>
+    );
+  }
 
-  if (!event) return null;
-  const eventLabel = event.title ?? event.name ?? "Untitled Event";
-
-  const date = new Date(event.date).toLocaleDateString("en-IN", {
-    weekday: "long", day: "numeric", month: "long", year: "numeric",
-  });
-  const time = new Date(event.date).toLocaleTimeString("en-IN", {
-    hour: "2-digit", minute: "2-digit",
-  });
+  const title = event.title ?? event.name ?? "Untitled event";
+  const d = formatEventDate(event.date);
+  const cheapest = listings[0]?.price;
 
   return (
     <div>
-      {/* Hero */}
-      <div className="relative h-72 md:h-96 overflow-hidden">
-        {event.image_url
-          ? <img src={event.image_url} alt={eventLabel} className="w-full h-full object-cover opacity-40" />
-          : <div className="w-full h-full bg-zinc-900" />
-        }
-        <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 to-transparent" />
-        <div className="absolute bottom-0 left-0 w-full max-w-7xl mx-auto px-4 pb-8">
-          <h1 className="font-display text-5xl md:text-7xl tracking-wide text-zinc-100">
-            {eventLabel}
-          </h1>
-          <div className="flex flex-wrap gap-4 mt-3 text-zinc-400 text-sm">
-            <span className="flex items-center gap-1"><Calendar className="w-4 h-4" />{date} · {time}</span>
-            <span className="flex items-center gap-1"><MapPin className="w-4 h-4" />{event.venue}</span>
-            {event.cities?.name && <span className="flex items-center gap-1"><Tag className="w-4 h-4" />{event.cities.name}</span>}
+      <section className="relative h-80 overflow-hidden md:h-96">
+        {event.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={event.image_url} alt="" className="size-full object-cover opacity-45" />
+        ) : (
+          <div className="size-full bg-gradient-to-br from-zinc-800 to-zinc-950" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
+
+        <div className="absolute inset-x-0 bottom-0">
+          <div className="container max-w-5xl pb-10">
+            <div className="mb-3 flex flex-wrap gap-2">
+              <Badge>{relativeTo(event.date)}</Badge>
+              {event.cities?.name && <Badge variant="neutral">{event.cities.name}</Badge>}
+            </div>
+            <h1 className="font-display text-5xl leading-[0.95] tracking-display md:text-7xl">
+              {title}
+            </h1>
+            <div className="mt-4 flex flex-wrap gap-5 text-sm text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <Calendar className="size-4" />
+                <span className="tnum">{d.full} · {d.time}</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <MapPin className="size-4" />
+                {event.venue}
+              </span>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Listings */}
-      <div className="max-w-7xl mx-auto px-4 py-12">
-        <h2 className="font-display text-3xl tracking-wide text-zinc-100 mb-6">
-          AVAILABLE TICKETS
-        </h2>
+      <div className="container max-w-5xl py-12">
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="eyebrow mb-2">
+              {listings.length} available
+              {cheapest ? ` · from ${inr(cheapest)}` : ""}
+            </p>
+            <h2 className="font-display text-3xl tracking-display">TICKETS</h2>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/sell">Sell yours</Link>
+          </Button>
+        </div>
 
         {listings.length === 0 ? (
-          <div className="text-center py-16 border border-zinc-800 rounded-xl">
-            <p className="text-zinc-600 font-display text-2xl tracking-wide">NO TICKETS LISTED</p>
-            <p className="text-zinc-600 text-sm mt-2">Be the first to sell a ticket for this event.</p>
-          </div>
+          <EmptyState
+            icon={TicketX}
+            title="No tickets listed yet"
+            description="Nobody is selling for this show right now. If you have a spare, you'd be the first."
+            actionLabel="List a ticket"
+            actionHref="/sell"
+          />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {listings.map((listing) => {
-              const discount = listing.original_price > listing.price
-                ? Math.round((1 - listing.price / listing.original_price) * 100)
-                : 0;
+          <div className="space-y-3">
+            {listings.map((l) => {
+              const saving =
+                l.original_price > l.price
+                  ? Math.round((1 - l.price / l.original_price) * 100)
+                  : 0;
+
               return (
-                <div key={listing.id} className="relative rounded-xl border border-zinc-800 bg-zinc-900 p-4 flex flex-col gap-3">
-                  {discount > 0 && (
-                    <span className="absolute top-3 right-3 bg-amber-500 text-zinc-950 text-xs font-mono px-2 py-0.5 rounded-full">
-                      -{discount}%
-                    </span>
-                  )}
-                  <div>
-                    <p className="text-zinc-400 text-xs">Qty: {listing.quantity} ticket{listing.quantity > 1 ? "s" : ""}</p>
-                  </div>
-                  <div className="flex items-end justify-between mt-auto pt-2 border-t border-zinc-800">
-                    <div>
-                      <p className="text-zinc-500 text-xs line-through font-mono">₹{listing.original_price?.toLocaleString()}</p>
-                      <p className="text-amber-400 text-lg font-mono font-medium">₹{listing.price?.toLocaleString()}</p>
-                      <p className="text-zinc-600 text-xs">per ticket</p>
+                <div
+                  key={l.id}
+                  className="flex flex-wrap items-center gap-5 rounded-lg border border-border bg-card p-5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <p className="tnum font-mono text-2xl text-primary">{inr(l.price)}</p>
+                      {saving > 0 && <Badge variant="success">{saving}% below face</Badge>}
                     </div>
-                    <button
-                      onClick={() => setSelectedListing(listing)}
-                      className="px-4 py-1.5 rounded-lg bg-zinc-100 text-zinc-950 text-sm font-medium hover:bg-amber-400 transition-colors"
-                    >
-                      Buy
-                    </button>
+                    <p className="tnum mt-1 font-mono text-xs text-muted-foreground">
+                      Face value {inr(l.original_price)}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
+                      <ShieldCheck className="size-3.5 text-primary" />
+                      Escrow protected
+                    </span>
+                    <Button onClick={() => setSelected(l)}>Buy</Button>
                   </div>
                 </div>
               );
             })}
           </div>
         )}
+
+        <div className="mt-8 flex gap-3 rounded-lg border border-border bg-secondary/30 p-5 text-sm">
+          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
+          <p className="text-muted-foreground">
+            Your payment is held until the seller transfers the ticket to your
+            ticketing account and you confirm you&apos;ve got it. If they
+            don&apos;t deliver, you&apos;re refunded in full and compensated from
+            their deposit.
+          </p>
+        </div>
       </div>
 
-      {/* Buy Modal */}
-      {selectedListing && (
+      {selected && (
         <BuyTicketModal
-          listing={selectedListing}
+          listing={selected}
           event={event}
-          onClose={() => setSelectedListing(null)}
+          onClose={() => setSelected(null)}
         />
       )}
     </div>

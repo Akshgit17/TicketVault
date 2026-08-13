@@ -1,7 +1,6 @@
 import hashlib
 import cv2
 import numpy as np
-from io import BytesIO
 import logging
 
 def decode_qr(image_bytes: bytes) -> str:

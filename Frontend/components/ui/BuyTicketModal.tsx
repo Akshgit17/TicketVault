@@ -1,205 +1,188 @@
 "use client";
-import { useState } from "react";
-import { useAuth } from "@clerk/nextjs";
-import { api, setAuthToken } from "@/lib/api";
+
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X } from "lucide-react";
+import { useAuth, useUser } from "@clerk/nextjs";
+import { toast } from "sonner";
+import { Lock, ShieldCheck } from "lucide-react";
+
+import { api, setAuthToken } from "@/lib/api";
+import { useConfig } from "@/lib/config";
+import { inr } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 
 declare global {
   interface Window { Razorpay: any; }
 }
 
-interface Props {
+export function BuyTicketModal({
+  listing,
+  event,
+  onClose,
+}: {
   listing: any;
-  event:   any;
+  event: any;
   onClose: () => void;
-}
-
-export function BuyTicketModal({ listing, event, onClose }: Props) {
+}) {
   const { getToken, isSignedIn } = useAuth();
-  const router  = useRouter();
-  const [step, setStep] = useState<"details" | "paying" | "done">("details");
-  const [qty,  setQty]  = useState(1);
+  const { user } = useUser();
+  const { config } = useConfig();
+  const router = useRouter();
+
   const [form, setForm] = useState({ name: "", email: "", phone: "" });
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const total = (listing.price * qty).toLocaleString();
+  // Prefill from Clerk. Asking a signed-in user to retype their own name and
+  // email is friction with no purpose — they already gave it to us.
+  useEffect(() => {
+    if (!user) return;
+    setForm((f) => ({
+      name: f.name || user.fullName || "",
+      email: f.email || user.primaryEmailAddress?.emailAddress || "",
+      phone: f.phone || user.primaryPhoneNumber?.phoneNumber || "",
+    }));
+  }, [user]);
 
-  const handleSubmit = async () => {
-    if (!isSignedIn) {
-      router.push("/sign-in");
-      return;
-    }
-    if (!form.name || !form.email || !form.phone) {
-      setError("All fields are required.");
-      return;
-    }
-    setError("");
+  const total = Number(listing.price);
+  const compensation = total * config.buyer_compensation_rate;
+  const valid = form.name.trim() && form.email.trim() && form.phone.replace(/\D/g, "").length >= 10;
+
+  function loadRazorpay(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (window.Razorpay) return resolve();
+      const s = document.createElement("script");
+      s.src = "https://checkout.razorpay.com/v1/checkout.js";
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error("Could not load the payment window."));
+      document.body.appendChild(s);
+    });
+  }
+
+  const submit = async () => {
+    if (!isSignedIn) return router.push("/sign-in");
+    if (!valid) return;
+
     setLoading(true);
-    setStep("paying");
-
     try {
-      const token = await getToken();
-      setAuthToken(token);
+      setAuthToken(await getToken());
 
-      // 1. Initiate booking — locks listing + creates Razorpay order
-      const { data: initData } = await api.post("/bookings/initiate", {
-        listing_id:  listing.id,
-        quantity:    qty,
-        buyer_name:  form.name,
-        buyer_email: form.email,
-        buyer_phone: form.phone,
+      const { data: init } = await api.post("/bookings/initiate", {
+        listing_id: listing.id,
+        quantity: 1,
+        buyer_name: form.name.trim(),
+        buyer_email: form.email.trim(),
+        buyer_phone: form.phone.trim(),
       });
 
-      // 2. Load Razorpay script dynamically
-      await loadRazorpayScript();
+      await loadRazorpay();
 
-      // 3. Open Razorpay checkout
       const rzp = new window.Razorpay({
-        key:         initData.razorpay_key_id,
-        amount:      initData.amount * 100,
-        currency:    "INR",
-        name:        "TicketVault",
-        description: `${qty}x ${event.title}`,
-        order_id:    initData.razorpay_order_id,
-        prefill: {
-          name:    form.name,
-          email:   form.email,
-          contact: form.phone,
-        },
+        key: init.razorpay_key_id,
+        amount: Math.round(init.amount * 100),
+        currency: "INR",
+        name: "TicketVault",
+        description: event.title ?? "Concert ticket",
+        order_id: init.razorpay_order_id,
+        prefill: { name: form.name, email: form.email, contact: form.phone },
         theme: { color: "#f59e0b" },
-
-        handler: async (response: any) => {
-          // 4. Verify payment on backend
+        handler: async (res: any) => {
           try {
-            const t = await getToken();
-            setAuthToken(t);
+            setAuthToken(await getToken());
             await api.post("/bookings/verify-payment", {
-              booking_id:           initData.booking_id,
-              razorpay_order_id:    response.razorpay_order_id,
-              razorpay_payment_id:  response.razorpay_payment_id,
-              razorpay_signature:   response.razorpay_signature,
+              booking_id: init.booking_id,
+              razorpay_order_id: res.razorpay_order_id,
+              razorpay_payment_id: res.razorpay_payment_id,
+              razorpay_signature: res.razorpay_signature,
             });
-            setStep("done");
-            // Redirect to confirmation page after 2s
-            setTimeout(() => {
-              router.push(`/bookings/${initData.booking_id}/confirm`);
-            }, 2000);
+            toast.success("Payment held in escrow", {
+              description: "Next: share the number your ticketing account uses.",
+            });
+            // Navigate immediately. The old flow used a 2s setTimeout, which
+            // left the user staring at a modal wondering if it had worked.
+            router.push(`/bookings/${init.booking_id}/confirm`);
           } catch (e: any) {
-            setError(e.message);
-            setStep("details");
+            toast.error("We couldn't confirm that payment", { description: e.message });
           }
         },
-
         modal: {
-          ondismiss: () => {
-            setStep("details");
-            setLoading(false);
-          },
+          ondismiss: () => setLoading(false),
         },
       });
 
       rzp.open();
-
     } catch (e: any) {
-      setError(e.message ?? "Failed to initiate payment.");
-      setStep("details");
-    } finally {
+      toast.error("Couldn't start checkout", { description: e.message });
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/80 backdrop-blur-sm">
-      <div className="relative w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-        <button onClick={onClose} className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300">
-          <X className="w-5 h-5" />
-        </button>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>CHECKOUT</DialogTitle>
+          <DialogDescription>{event.title}</DialogDescription>
+        </DialogHeader>
 
-        {step === "done" ? (
-          <div className="text-center py-8">
-            <div className="text-4xl mb-4">🎟️</div>
-            <h2 className="font-display text-3xl tracking-wide text-amber-400 mb-2">PAYMENT SUCCESS</h2>
-            <p className="text-zinc-400 text-sm">Redirecting to your booking...</p>
-          </div>
-        ) : (
-          <>
-            <h2 className="font-display text-3xl tracking-wide text-zinc-100 mb-1">BUY TICKET</h2>
-            <p className="text-zinc-500 text-sm mb-6">{event.title}</p>
-
-            {/* Quantity */}
-            <div className="mb-4">
-              <label className="block text-xs text-zinc-500 mb-1.5 tracking-wider uppercase">Quantity</label>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setQty(q => Math.max(1, q - 1))}
-                  className="w-9 h-9 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700 flex items-center justify-center font-mono text-lg"
-                >-</button>
-                <span className="font-mono text-zinc-100 w-6 text-center">{qty}</span>
-                <button
-                  onClick={() => setQty(q => Math.min(listing.quantity, q + 1))}
-                  className="w-9 h-9 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700 flex items-center justify-center font-mono text-lg"
-                >+</button>
-                <span className="text-zinc-500 text-sm ml-1">of {listing.quantity} available</span>
-              </div>
+        <div className="space-y-5 p-5">
+          <div className="rounded-lg border border-border bg-secondary/30 p-4">
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm text-muted-foreground">You pay</span>
+              <span className="tnum font-mono text-2xl text-primary">{inr(total)}</span>
             </div>
-
-            {/* Buyer details */}
-            {[
-              { label: "Full Name",     key: "name",  type: "text",  placeholder: "Your name" },
-              { label: "Email",         key: "email", type: "email", placeholder: "your@email.com" },
-              { label: "Phone Number",  key: "phone", type: "tel",   placeholder: "+91 98765 43210" },
-            ].map(({ label, key, type, placeholder }) => (
-              <div key={key} className="mb-4">
-                <label className="block text-xs text-zinc-500 mb-1.5 tracking-wider uppercase">{label}</label>
-                <input
-                  type={type}
-                  value={(form as any)[key]}
-                  onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                  placeholder={placeholder}
-                  className="w-full px-4 py-2.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm focus:outline-none focus:border-zinc-500 placeholder:text-zinc-600"
-                />
-              </div>
-            ))}
-
-            {/* Total */}
-            <div className="flex items-center justify-between px-4 py-3 rounded-lg bg-zinc-950 border border-zinc-800 mb-4">
-              <span className="text-zinc-500 text-sm">Total ({qty} ticket{qty > 1 ? "s" : ""})</span>
-              <span className="text-amber-400 font-mono font-medium text-lg">₹{total}</span>
-            </div>
-
-            {error && (
-              <p className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 px-4 py-2 rounded-lg mb-4">
-                {error}
-              </p>
-            )}
-
-            <button
-              onClick={handleSubmit}
-              disabled={loading || step === "paying"}
-              className="w-full py-3 rounded-lg bg-amber-500 text-zinc-950 font-medium hover:bg-amber-400 transition-colors disabled:opacity-50"
-            >
-              {loading ? "Processing..." : `Pay ₹${total} via Razorpay`}
-            </button>
-
-            <p className="text-zinc-600 text-xs text-center mt-3">
-              Secured by Razorpay · Ticket locked for 5 minutes during payment
+            <div className="perforation my-3" />
+            <p className="flex items-start gap-2 text-xs text-muted-foreground">
+              <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-primary" />
+              Held by TicketVault until the ticket is in your account. If the
+              seller doesn&apos;t deliver within {config.transfer_sla_hours} hours,
+              you get a full refund plus {inr(compensation)}.
             </p>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
+          </div>
 
-function loadRazorpayScript(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (window.Razorpay) { resolve(); return; }
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.onload  = () => resolve();
-    script.onerror = () => reject(new Error("Failed to load Razorpay script"));
-    document.body.appendChild(script);
-  });
+          <div className="space-y-2">
+            <Label htmlFor="buy-name">Full name</Label>
+            <Input
+              id="buy-name" value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="buy-email">Email</Label>
+            <Input
+              id="buy-email" type="email" value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="buy-phone">Phone</Label>
+            <Input
+              id="buy-phone" type="tel" inputMode="numeric" value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              className="tnum font-mono"
+            />
+            <p className="text-xs text-muted-foreground">
+              For order updates. You&apos;ll confirm your ticketing-app number
+              separately, after payment.
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={!valid} loading={loading} onClick={submit}>
+            <Lock />
+            Pay {inr(total)}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }

@@ -1,170 +1,379 @@
 "use client";
-import { useEffect, useState } from "react";
-import { useAuth } from "@clerk/nextjs";
-import { api, setAuthToken } from "@/lib/api";
-import { CountdownTimer } from "@/components/ui/CountdownTimer";
-import { useRouter } from "next/navigation";
-import { Calendar, MapPin } from "lucide-react";
 
-export default function BookingConfirmPage({ params }: { params: { id: string } }) {
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
+import { toast } from "sonner";
+import {
+  Calendar, CheckCircle2, MapPin, Phone, ShieldCheck, TriangleAlert,
+} from "lucide-react";
+
+import { api, setAuthToken } from "@/lib/api";
+import { useConfig } from "@/lib/config";
+import { FULFILLMENT_STATUS, statusMeta } from "@/lib/status";
+import { formatEventDate, inr } from "@/lib/utils";
+import { BookingTimeline } from "@/components/ui/BookingTimeline";
+import { CountdownTimer } from "@/components/ui/CountdownTimer";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input, Textarea } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+
+export default function BookingTransferPage({ params }: { params: { id: string } }) {
   const { getToken } = useAuth();
   const router = useRouter();
+  const { config } = useConfig();
+
   const [booking, setBooking] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [acting, setActing]   = useState(false);
-  const [error, setError]     = useState("");
-  const [done, setDone]       = useState("");
+  const [acting, setActing] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      const token = await getToken();
-      setAuthToken(token);
-      try {
-        const { data } = await api.get(`/bookings/${params.id}`);
-        setBooking(data);
-      } catch (e: any) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const [mobile, setMobile] = useState("");
+  const [consent, setConsent] = useState(false);
 
-  const act = async (action: "confirm" | "dispute") => {
-    setActing(true);
-    setError("");
+  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [disputeReason, setDisputeReason] = useState("");
+
+  const load = useCallback(async () => {
     try {
-      const token = await getToken();
-      setAuthToken(token);
-      if (action === "confirm") {
-        await api.post("/bookings/confirm", { booking_id: params.id });
-        setDone("confirmed");
-      } else {
-        await api.post("/bookings/dispute", { booking_id: params.id, reason: "Issue reported by buyer" });
-        setDone("disputed");
-      }
+      setAuthToken(await getToken());
+      const { data } = await api.get(`/bookings/${params.id}`);
+      setBooking(data);
     } catch (e: any) {
-      setError(e.message);
+      toast.error("Couldn't load this booking", { description: e.message });
+    } finally {
+      setLoading(false);
+    }
+  }, [getToken, params.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const status: string = booking?.fulfillment_status ?? "not_started";
+  const meta = statusMeta(FULFILLMENT_STATUS, status);
+  const event = booking?.listings?.events;
+  const hasMobile = Boolean(booking?.mobile_consent_at);
+
+  const submitMobile = async () => {
+    setActing(true);
+    try {
+      setAuthToken(await getToken());
+      await api.post("/bookings/transfer-mobile", {
+        booking_id: params.id,
+        mobile,
+        consent: true,
+      });
+      toast.success("Number shared with the seller");
+      await load();
+    } catch (e: any) {
+      toast.error("Couldn't save that number", { description: e.message });
     } finally {
       setActing(false);
     }
   };
 
-  if (loading) return (
-    <div className="flex items-center justify-center min-h-[60vh]">
-      <div className="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-    </div>
-  );
+  const confirmReceipt = async () => {
+    setActing(true);
+    try {
+      setAuthToken(await getToken());
+      await api.post("/bookings/confirm", { booking_id: params.id });
+      toast.success("Confirmed. Enjoy the show", {
+        description: `The seller is paid in ${config.settlement_hold_hours} hours. Tell us before then if anything's wrong.`,
+      });
+      await load();
+    } catch (e: any) {
+      toast.error("Couldn't confirm", { description: e.message });
+    } finally {
+      setActing(false);
+    }
+  };
 
-  if (error && !booking) return (
-    <div className="max-w-lg mx-auto px-4 py-16 text-red-400">{error}</div>
-  );
+  const reportProblem = async () => {
+    setActing(true);
+    try {
+      setAuthToken(await getToken());
+      await api.post("/bookings/dispute", {
+        booking_id: params.id,
+        reason: disputeReason.trim() || "Buyer reported a problem with the transfer",
+      });
+      toast.success("Reported", { description: "We've paused the payout and will look into it." });
+      setDisputeOpen(false);
+      await load();
+    } catch (e: any) {
+      toast.error("Couldn't report that", { description: e.message });
+    } finally {
+      setActing(false);
+    }
+  };
 
-  const listing = booking?.listings;
-  const event   = listing?.events;
-  const date    = event ? new Date(event.date).toLocaleDateString("en-IN", {
-    weekday: "short", day: "numeric", month: "short", year: "numeric",
-  }) : "";
-  const qrUrl =
-    booking?.qr_signed_url
-    || (booking?.listings?.qr_image_url
-      ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/ticket-qrs/${booking.listings.qr_image_url}`
-      : null);
+  if (loading) {
+    return (
+      <div className="container max-w-2xl space-y-4 py-14">
+        <Skeleton className="h-10 w-2/3" />
+        <Skeleton className="h-40" />
+        <Skeleton className="h-32" />
+      </div>
+    );
+  }
 
-  if (done) return (
-    <div className="max-w-lg mx-auto px-4 py-16 text-center">
-      <div className="text-6xl mb-4">{done === "confirmed" ? "✅" : "🚨"}</div>
-      <h1 className="font-display text-4xl tracking-wide text-zinc-100 mb-2">
-        {done === "confirmed" ? "TICKET CONFIRMED" : "DISPUTE FILED"}
-      </h1>
-      <p className="text-zinc-400 text-sm mb-6">
-        {done === "confirmed"
-          ? "Your ticket has been confirmed. Enjoy the show!"
-          : "Your dispute has been filed. Our team will review it."}
-      </p>
-      <button onClick={() => router.push("/dashboard")}
-        className="px-6 py-2.5 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors text-sm">
-        Go to Dashboard
-      </button>
-    </div>
-  );
+  if (!booking) {
+    return (
+      <div className="container max-w-2xl py-20 text-center">
+        <p className="font-display text-3xl tracking-display">BOOKING NOT FOUND</p>
+        <Button variant="outline" className="mt-6" onClick={() => router.push("/dashboard")}>
+          Back to dashboard
+        </Button>
+      </div>
+    );
+  }
+
+  const d = event ? formatEventDate(event.date) : null;
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-16">
-      <h1 className="font-display text-5xl tracking-wide text-zinc-100 mb-2">CONFIRM TICKET</h1>
-      <p className="text-zinc-500 text-sm mb-8">Verify your ticket details and confirm receipt within 2 hours.</p>
+    <div className="container max-w-2xl py-14">
+      <p className="eyebrow mb-2">Your purchase</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="font-display text-4xl tracking-display">
+          {event?.title ?? "Your ticket"}
+        </h1>
+        <Badge variant={meta.tone}>{meta.label}</Badge>
+      </div>
 
-      {/* Event info */}
-      {event && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 mb-6 space-y-2">
-          <p className="font-display text-2xl tracking-wide">{event.title}</p>
-          <div className="flex gap-4 text-zinc-500 text-sm">
-            <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{date}</span>
-            <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{event.venue}</span>
+      {d && (
+        <div className="mt-3 flex flex-wrap gap-4 text-sm text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <Calendar className="size-3.5" />
+            <span className="tnum">{d.full}</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <MapPin className="size-3.5" />
+            {event.venue}
+          </span>
+        </div>
+      )}
+
+      <div className="mt-8 rounded-lg border border-border bg-card p-6">
+        <BookingTimeline status={status} />
+      </div>
+
+      {/* Escrow reassurance — the single most useful thing to say to someone
+          who has just paid a stranger for a ticket. */}
+      <div className="mt-5 flex gap-3 rounded-lg border border-border bg-secondary/30 p-4">
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
+        <div className="text-sm">
+          <p className="font-medium">
+            {inr(booking.total_price)} is held by TicketVault
+          </p>
+          <p className="mt-1 text-muted-foreground">{meta.buyerHint}</p>
+        </div>
+      </div>
+
+      {booking.transfer_deadline && status === "awaiting_transfer" && (
+        <CountdownTimer
+          deadline={booking.transfer_deadline}
+          label="Seller must transfer within"
+          className="mt-4"
+        />
+      )}
+
+      <Separator perforated className="my-8" />
+
+      {/* Step 1 — the number the seller needs to perform the transfer. */}
+      {!hasMobile && status !== "released" && status !== "failed" && (
+        <section className="rounded-lg border border-primary/40 bg-primary/5 p-6">
+          <div className="flex items-center gap-2">
+            <Phone className="size-4 text-primary" />
+            <h2 className="font-display text-2xl tracking-display">
+              ONE THING WE NEED
+            </h2>
           </div>
-          <div className="flex justify-between pt-2 border-t border-zinc-800">
-            <span className="text-zinc-500 text-sm">Qty: {booking.quantity}</span>
-            <span className="text-amber-400 font-mono">₹{booking.total_price?.toLocaleString()}</span>
+          <p className="mt-2 text-sm text-muted-foreground">
+            The seller transfers the ticket to your ticketing account, so they
+            need the mobile number it&apos;s registered to. Nothing can happen
+            until we have it.
+          </p>
+
+          <div className="mt-5 space-y-2">
+            <Label htmlFor="mobile">Registered mobile number</Label>
+            <Input
+              id="mobile" type="tel" inputMode="numeric" value={mobile}
+              onChange={(e) => setMobile(e.target.value)}
+              placeholder="98765 43210" className="tnum font-mono"
+            />
           </div>
-        </div>
-      )}
 
-      {/* QR Code */}
-      {qrUrl && (
-        <div className="mb-6">
-          <p className="text-xs text-zinc-500 mb-2 tracking-wider uppercase">Your QR Code</p>
-          <img
-            src={qrUrl}
-            alt="QR Code"
-            className="w-48 h-48 rounded-xl border border-zinc-700 bg-zinc-800"
-          />
-        </div>
-      )}
+          <label className="mt-4 flex cursor-pointer items-start gap-3 text-sm">
+            <input
+              type="checkbox" checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+              className="mt-0.5 size-4 shrink-0 accent-amber-500"
+            />
+            <span className="text-muted-foreground">
+              I agree to share this number with the seller for this transfer.
+              They will see it until the sale completes.
+            </span>
+          </label>
 
-      {!qrUrl && booking?.payment_status === "paid" && (
-        <div className="mb-6 px-4 py-3 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-500 text-sm">
-          QR code not provided by seller. You can dispute this purchase.
-        </div>
-      )}
-
-      {/* Countdown */}
-      {booking?.confirmation_deadline && booking?.confirmation_status === "pending" && (
-        <div className="mb-8">
-          <p className="text-xs text-zinc-500 mb-3 tracking-wider uppercase">Time remaining to confirm</p>
-          <CountdownTimer deadline={booking.confirmation_deadline} />
-        </div>
-      )}
-
-      {booking?.confirmation_status !== "pending" && (
-        <div className="mb-6 px-4 py-3 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-400 text-sm">
-          Status: <span className="text-amber-400 capitalize">{booking?.confirmation_status?.replace("_", " ")}</span>
-        </div>
-      )}
-
-      {error && (
-        <p className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 px-4 py-2 rounded-lg mb-4">
-          {error}
-        </p>
-      )}
-
-      {booking?.confirmation_status === "pending" && (
-        <div className="flex gap-3">
-          <button
-            onClick={() => act("confirm")}
-            disabled={acting}
-            className="flex-1 py-3 rounded-lg bg-amber-500 text-zinc-950 font-medium hover:bg-amber-400 transition-colors disabled:opacity-50"
+          <Button
+            className="mt-5 w-full"
+            disabled={!consent || mobile.replace(/\D/g, "").length < 10}
+            loading={acting}
+            onClick={submitMobile}
           >
-            ✓ Confirm Received
-          </button>
-          <button
-            onClick={() => act("dispute")}
-            disabled={acting}
-            className="flex-1 py-3 rounded-lg border border-red-500/50 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
-          >
-            ✗ Report Issue
-          </button>
-        </div>
+            Share with seller
+          </Button>
+        </section>
       )}
+
+      {/* Step 2 — waiting on the seller. */}
+      {hasMobile && status === "awaiting_transfer" && (
+        <section className="rounded-lg border border-border bg-card p-6 text-center">
+          <p className="font-display text-2xl tracking-display">WAITING ON THE SELLER</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
+            We&apos;ve sent them your number. If they don&apos;t transfer in time,
+            you&apos;re refunded in full and paid{" "}
+            {inr(booking.total_price * config.buyer_compensation_rate)} on top. That
+            happens automatically, without you chasing anyone.
+          </p>
+        </section>
+      )}
+
+      {/* Step 3 — the confirmation decision. */}
+      {status === "transfer_initiated" && (
+        <section className="rounded-lg border border-border bg-card p-6">
+          <h2 className="font-display text-2xl tracking-display">
+            DID THE TICKET ARRIVE?
+          </h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Open your ticketing app and check for the ticket. Confirm only once
+            you can actually see it. This is what releases the seller&apos;s money.
+          </p>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <Button className="flex-1" loading={acting} onClick={confirmReceipt}>
+              <CheckCircle2 />
+              Yes, it&apos;s in my account
+            </Button>
+            <Button
+              variant="outline" className="flex-1 border-destructive/40 text-destructive hover:bg-destructive/10"
+              onClick={() => setDisputeOpen(true)}
+            >
+              <TriangleAlert />
+              No, report a problem
+            </Button>
+          </div>
+        </section>
+      )}
+
+      {(status === "transfer_confirmed" || status === "released") && (
+        <section className="rounded-lg border border-success/40 bg-success/5 p-6 text-center">
+          <CheckCircle2 className="mx-auto size-8 text-success" />
+          <p className="mt-3 font-display text-2xl tracking-display">
+            {status === "released" ? "ALL DONE" : "CONFIRMED"}
+          </p>
+          <p className="mt-2 text-sm text-muted-foreground">{meta.buyerHint}</p>
+          {status === "transfer_confirmed" && (
+            <Button
+              variant="ghost" size="sm" className="mt-4 text-destructive"
+              onClick={() => setDisputeOpen(true)}
+            >
+              Something&apos;s wrong with the ticket
+            </Button>
+          )}
+        </section>
+      )}
+
+      {status === "failed" && (
+        <section className="rounded-lg border border-destructive/40 bg-destructive/5 p-6">
+          <div className="text-center">
+            <TriangleAlert className="mx-auto size-8 text-destructive" />
+            <p className="mt-3 font-display text-2xl tracking-display">TRANSFER FAILED</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              The seller did not transfer the ticket in time, so you have been
+              refunded automatically.
+            </p>
+          </div>
+
+          {/* What they get back, and whether it has actually moved. A buyer
+              who has just lost a ticket should not have to guess at either. */}
+          {booking.refund && (
+            <div className="mt-6 rounded-lg border border-border bg-background p-5">
+              <p className="eyebrow mb-4">Your money back</p>
+              <dl className="space-y-3 text-sm">
+                {booking.refund.refunded_paise > 0 && (
+                  <div className="flex items-start justify-between gap-4">
+                    <dt>
+                      <span className="text-foreground">Ticket refund</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        Sent to your original payment method. Banks take 5 to 7
+                        working days.
+                      </span>
+                    </dt>
+                    <dd className="tnum shrink-0 font-mono text-lg text-success">
+                      {inr(booking.refund.refunded_paise / 100)}
+                    </dd>
+                  </div>
+                )}
+
+                {booking.refund.compensation_paise > 0 && (
+                  <>
+                    <div className="perforation" />
+                    <div className="flex items-start justify-between gap-4">
+                      <dt>
+                        <span className="text-foreground">Compensation</span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          Paid out of the seller&apos;s forfeited deposit, because
+                          they let you down.
+                        </span>
+                      </dt>
+                      <dd className="tnum shrink-0 font-mono text-lg text-primary">
+                        {inr(booking.refund.compensation_paise / 100)}
+                      </dd>
+                    </div>
+                  </>
+                )}
+              </dl>
+
+              {booking.refund.razorpay_refund_id && (
+                <p className="tnum mt-4 border-t border-border pt-3 font-mono text-[11px] text-muted-foreground">
+                  Refund reference {booking.refund.razorpay_refund_id}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      <Dialog open={disputeOpen} onOpenChange={setDisputeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>REPORT A PROBLEM</DialogTitle>
+            <DialogDescription>
+              Tell us what went wrong. We&apos;ll hold the seller&apos;s payout
+              while we look into it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 p-5">
+            <Label htmlFor="reason">What happened?</Label>
+            <Textarea
+              id="reason" value={disputeReason}
+              onChange={(e) => setDisputeReason(e.target.value)}
+              placeholder="e.g. Nothing arrived in my BookMyShow account, or the ticket is for the wrong date."
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDisputeOpen(false)}>Cancel</Button>
+            <Button variant="destructive" loading={acting} onClick={reportProblem}>
+              Report problem
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
