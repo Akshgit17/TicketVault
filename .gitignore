@@ -88,3 +88,6 @@ claude/
 *.claude*
 CLAUDE.md
 claude.md
+
+# GitHub Workflows / Actions
+.github/
