@@ -53,37 +53,12 @@ broke the deal, out of money they had already put at risk.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph client [Browser]
-        UI[Next.js 14 App Router<br/>React, Tailwind, shadcn]
-    end
-
-    subgraph server [FastAPI]
-        API[REST API<br/>43 routes]
-        JOBS[Background jobs<br/>APScheduler]
-        ML[Pricing service<br/>scikit-learn]
-    end
-
-    subgraph data [Supabase]
-        PG[(PostgreSQL<br/>RLS enabled)]
-        ST[Object storage]
-    end
-
-    CLERK[Clerk auth]
-    RZP[Razorpay]
-
-    UI -->|JWT bearer| API
-    UI -->|session| CLERK
-    UI -->|checkout| RZP
-    API -->|verify JWT via JWKS| CLERK
-    API -->|service role key| PG
-    API --> ST
-    API -->|orders, refunds| RZP
-    RZP -->|webhooks| API
-    JOBS --> PG
-    JOBS --> RZP
-    ML --> API
+```
+[Browser: Next.js 14 App Router]
+       │
+       ├────► (JWT bearer) ─────► [FastAPI Backend] ─────► [Supabase PostgreSQL & Storage]
+       ├────► (Session) ────────► [Clerk Auth]
+       └────► (Checkout) ───────► [Razorpay] ◄────────────┤ (Webhooks)
 ```
 
 Two things about this diagram are deliberate.
@@ -105,20 +80,10 @@ Every state change goes through one service module with explicit allowed
 transitions, and every transition writes an audit row to `booking_events`. No
 route mutates a booking's status directly.
 
-```mermaid
-stateDiagram-v2
-    [*] --> pending_payment
-    pending_payment --> paid: payment captured
-    paid --> awaiting_transfer: escrow holds funds
-    awaiting_transfer --> transfer_initiated: seller marks sent
-    transfer_initiated --> transfer_confirmed: buyer confirms receipt
-    transfer_confirmed --> released: payout plus deposit return
-
-    awaiting_transfer --> failed: SLA breached
-    transfer_initiated --> failed: buyer reports a problem
-
-    released --> [*]
-    failed --> [*]
+```
+`pending_payment` ➔ `paid` ➔ `awaiting_transfer` ➔ `transfer_initiated` ➔ `transfer_confirmed` ➔ `released`
+                                   │                           │
+                                   └─────────► `failed` ◄──────┘
 ```
 
 The two terminal states are where the money settles:
@@ -261,71 +226,13 @@ actually chose, which is the training set that replaces this one.
 
 ## Data model
 
-```mermaid
-erDiagram
-    cities ||--o{ events : hosts
-    cities ||--o{ listings : "located in"
-    users ||--o{ listings : sells
-    users ||--o{ bookings : buys
-    users ||--o{ event_requests : proposes
-    events ||--o{ listings : "tickets for"
-    listings ||--o{ bookings : "sold via"
-    bookings ||--o{ booking_events : "audited by"
-    bookings ||--o{ ledger_entries : records
-    bookings ||--o| payouts : "pays seller"
-    bookings ||--o| refunds : "returns to buyer"
-    listings ||--o{ ledger_entries : "deposit for"
-    events ||--o{ pricing_recommendations : "priced by"
-
-    cities {
-        uuid id PK
-        text name UK
-        smallint city_tier
-    }
-    users {
-        uuid id PK
-        text clerk_id UK
-        text email UK
-        bool is_admin
-        text razorpay_linked_account_id
-    }
-    events {
-        uuid id PK
-        text title
-        uuid city_id FK
-        timestamptz date
-        bool transfer_supported
-        smallint popularity_tier
-    }
-    listings {
-        uuid id PK
-        uuid event_id FK
-        uuid seller_id FK
-        numeric price
-        numeric original_price
-        listing_status status
-        bigint deposit_paid_paise
-        timestamptz deposit_returned_at
-        timestamptz deposit_forfeited_at
-    }
-    bookings {
-        uuid id PK
-        uuid listing_id FK
-        uuid user_id FK
-        numeric total_price
-        text payment_status
-        fulfillment_status fulfillment_status
-        timestamptz transfer_deadline
-        timestamptz escrow_release_at
-    }
-    ledger_entries {
-        uuid id PK
-        ledger_kind kind
-        text direction
-        bigint amount_paise
-        text idempotency_key UK
-    }
-```
+| Table | Description & Primary Keys | Key Relationships |
+|---|---|---|
+| `users` | User profiles and credentials (`id`, `clerk_id`, `email`) | `sells` listings, `buys` bookings |
+| `events` | Concerts and venue details (`id`, `title`, `city_id`, `date`) | Hosted in `cities`, has `listings` |
+| `listings` | Ticket listings (`id`, `event_id`, `seller_id`, `price`, `status`) | Linked to `events` & `users` |
+| `bookings` | Escrow bookings (`id`, `listing_id`, `user_id`, `total_price`) | Purchases `listings`, records `ledger_entries` |
+| `ledger_entries` | Financial audit ledger (`id`, `kind`, `amount_paise`, `idempotency_key`) | Audits all payments & deposit releases |
 
 `ledger_entries` carries a unique `idempotency_key` on every row, which is what
 makes a redelivered webhook or a retried job safe rather than merely unlikely.
@@ -450,28 +357,6 @@ Remove them afterwards. The defaults are 24 and 6 hours.
 
 ## What this project does not do
 
-Read [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) before assessing
-it. The short version:
-
-- **Seller payouts are simulated.** Razorpay Route has required ₹40 lakh
-  turnover since the RBI rules of September 2025 and was withdrawn from non
-  compliant merchants on 1 January 2026, so no student project can settle money
-  to a third party. The payout row, fee split, ledger entries and state
-  transitions are all real; only the outbound bank leg is stood in for, with a
-  `sim_` prefixed transfer id. **Refunds are genuinely real**, including the
-  deposit return.
-- **Ticket transfer is coordinated, not verified.** No public API exists for
-  BookMyShow or District transfers. The platform orchestrates and records the
-  transfer. It cannot prove it happened.
-- **There are no notifications.** No email, no SMS. A seller learns their ticket
-  sold by logging in, which is why the transfer SLA is deliberately generous.
-
-## Further reading
-
-| Document | What it covers |
-|---|---|
-| [`docs/VIVA.md`](docs/VIVA.md) | How every part works, plus 29 anticipated questions with answers |
-| [`docs/COLLEGE_PROJECT_PLAN.md`](docs/COLLEGE_PROJECT_PLAN.md) | The active plan, and the reasoning behind each scope decision |
-| [`docs/REMEDIATION_PLAN.md`](docs/REMEDIATION_PLAN.md) | The full audit this began from, and what a production version would need |
-| [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md) | Razorpay webhook handling and replay safety |
-| `docs/decisions/` | Architecture decision records |
+- **Seller payouts are simulated.** Razorpay Route has required ₹40 lakh turnover since the RBI rules of September 2025, so no student project can settle money to a third party. The payout row, fee split, ledger entries and state transitions are all real; only the outbound bank leg is simulated. **Refunds are genuinely real**, including the deposit return.
+- **Ticket transfer is coordinated, not verified.** No public API exists for BookMyShow or District transfers. The platform orchestrates and records the transfer.
+- **There are no notifications.** No email, no SMS. A seller learns their ticket sold by logging in, which is why the transfer SLA is deliberately generous.
