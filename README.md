@@ -341,7 +341,7 @@ Remove them afterwards. The defaults are 24 and 6 hours.
 
 ## What this project does not do
 
-Read [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) before assessing
+Read [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) before assessing
 it. The short version:
 
 - **Seller payouts are simulated.** Razorpay Route has required ₹40 lakh
@@ -357,12 +357,3 @@ it. The short version:
 - **There are no notifications.** No email, no SMS. A seller learns their ticket
   sold by logging in, which is why the transfer SLA is deliberately generous.
 
-## Further reading
-
-| Document | What it covers |
-|---|---|
-| [`docs/VIVA.md`](docs/VIVA.md) | How every part works, plus 29 anticipated questions with answers |
-| [`docs/COLLEGE_PROJECT_PLAN.md`](docs/COLLEGE_PROJECT_PLAN.md) | The active plan, and the reasoning behind each scope decision |
-| [`docs/REMEDIATION_PLAN.md`](docs/REMEDIATION_PLAN.md) | The full audit this began from, and what a production version would need |
-| [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md) | Razorpay webhook handling and replay safety |
-| `docs/decisions/` | Architecture decision records |
